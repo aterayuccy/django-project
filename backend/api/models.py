@@ -10,3 +10,30 @@ class Note(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class SavedVideo(models.Model):
+    class VideoFormat(models.TextChoices):
+        SHORT = "short", "短影片"
+        LONG = "long", "長影片"
+
+    title = models.CharField(max_length=120)
+    video = models.FileField(upload_to="saved_videos/")
+    video_format = models.CharField(
+        max_length=10,
+        choices=VideoFormat.choices,
+        default=VideoFormat.LONG,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    author = models.ForeignKey(User, on_delete=models.CASCADE, related_name="saved_videos")
+
+    def delete(self, *args, **kwargs):
+        storage = self.video.storage
+        name = self.video.name
+        super().delete(*args, **kwargs)
+
+        if name and storage.exists(name):
+            storage.delete(name)
+
+    def __str__(self):
+        return self.title

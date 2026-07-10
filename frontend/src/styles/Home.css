@@ -1,68 +1,303 @@
-/* Container for the whole page */
-div {
-  font-family: Arial, sans-serif;
+.workspace-page {
+  width: min(1560px, calc(100% - 32px));
+  margin: 0 auto 0 72px;
+  padding: 72px 0 56px;
 }
 
-/* Styles for the notes section */
-.notes-section {
-  margin-bottom: 2rem;
+.task-form {
+  display: grid;
+  grid-template-columns: 380px minmax(0, 1fr);
+  gap: 56px;
+  align-items: start;
 }
 
-.notes-section h2 {
-  color: #333;
-  font-size: 24px;
+.settings-panel,
+.work-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px;
+  border: 1px solid #e5ebf3;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.08);
 }
 
-/* Styles for individual notes - assuming your Note component has some container element */
-.note {
-  background-color: #f9f9f9;
-  border-left: 5px solid #007bff;
-  margin: 10px 0;
-  padding: 10px 15px;
-  border-radius: 5px;
+.task-form label {
+  color: #263244;
+  font-weight: 700;
+  text-align: left;
 }
 
-/* Styles for the form section */
-form {
-  background-color: #fff;
-  padding: 20px;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  max-width: 500px;
-  margin: auto;
-}
-
-form h2 {
-  color: #333;
-  font-size: 24px;
-  margin-bottom: 20px;
-}
-
-form label {
-  font-weight: bold;
-  margin-top: 10px;
-}
-
-form input,
-form textarea {
+.task-form input,
+.task-form select,
+.task-form textarea {
   width: 100%;
-  padding: 8px;
-  margin: 8px 0 16px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  padding: 12px 14px;
+  margin: 0 0 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
   box-sizing: border-box;
+  color: #111827;
+  font-size: 16px;
+  outline: none;
 }
 
-form input[type="submit"] {
-  background-color: #007bff;
-  color: white;
-  padding: 10px 20px;
-  border: none;
-  border-radius: 4px;
+.task-form select {
+  background: #ffffff;
   cursor: pointer;
+}
+
+.task-form input:focus,
+.task-form select:focus,
+.task-form textarea:focus {
+  border-color: #0d9488;
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.16);
+}
+
+.task-form button {
+  min-height: 44px;
+  border: none;
+  border-radius: 6px;
+  background: #7c3aed;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.task-form button:hover:not(:disabled) {
+  background: #6d28d9;
+}
+
+.task-form button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.api-key-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 82px;
+  gap: 0;
+  align-items: start;
+}
+
+.segment-count-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 82px;
+  gap: 0;
+  align-items: start;
+}
+
+.task-form .api-key-row input {
+  margin: 0 0 10px;
+  border-right: 0;
+  border-radius: 6px 0 0 6px;
+}
+
+.task-form .segment-count-row input {
+  margin: 0 0 10px;
+  border-right: 0;
+  border-radius: 6px 0 0 6px;
+}
+
+.pixabay-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  padding: 10px 12px;
+  border-radius: 0 6px 6px 0;
+  background: #2563eb;
+  color: #ffffff;
+  box-sizing: border-box;
+  font-size: 16px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.pixabay-link:hover {
+  background: #1d4ed8;
+}
+
+.task-form .segment-add-button {
+  min-height: 46px;
+  border-radius: 0 6px 6px 0;
+  background: #7c3aed;
   font-size: 16px;
 }
 
-form input[type="submit"]:hover {
-  background-color: #0056b3;
+.task-form .segment-add-button:hover:not(:disabled) {
+  background: #6d28d9;
+}
+
+.segment-list {
+  display: grid;
+  gap: 14px;
+  margin-top: 8px;
+}
+
+.segment-row {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid #e5ebf3;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.segment-controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 130px 18px 130px 130px;
+  gap: 0;
+  align-items: start;
+}
+
+.task-form .segment-controls input {
+  margin: 0;
+}
+
+.segment-controls input:first-child {
+  border-right: 0;
+  border-radius: 6px 0 0 6px;
+}
+
+.task-form .keyword-input {
+  min-width: 0;
+  border-right: 0;
+  border-radius: 6px 0 0 6px;
+  grid-column: 4;
+}
+
+.task-form .segment-button,
+.task-form .material-button {
+  width: 100%;
+  min-height: 46px;
+  padding: 10px 12px;
+  white-space: normal;
+}
+
+.task-form .segment-button {
+  border-radius: 0 6px 6px 0;
+}
+
+.task-form .material-button {
+  border-radius: 0 6px 6px 0;
+  grid-column: 5;
+}
+
+.segment-error {
+  margin: 0;
+  color: #b91c1c;
+  font-size: 14px;
+  text-align: left;
+}
+
+.material-preview,
+.result-preview {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #e5ebf3;
+  border-radius: 8px;
+  background: #ffffff;
+  box-sizing: border-box;
+}
+
+.material-preview video,
+.result-preview video {
+  display: block;
+  width: min(100%, 760px);
+  aspect-ratio: 16 / 9;
+  margin: 0 auto;
+  border-radius: 6px;
+  background: #111827;
+  object-fit: contain;
+}
+
+.task-form .replace-material-button {
+  display: block;
+  width: 130px;
+  min-height: 42px;
+  margin: 12px auto 0;
+  border-radius: 8px;
+  background: #6d42b8;
+  font-size: 15px;
+}
+
+.task-form .replace-material-button:hover:not(:disabled) {
+  background: #5b359b;
+}
+
+.result-preview--short video {
+  width: min(100%, 400px);
+  aspect-ratio: 9 / 16;
+}
+
+.task-form .save-video-button {
+  display: block;
+  width: 130px;
+  min-height: 46px;
+  margin: 14px auto 0;
+  border-radius: 8px;
+  background: #2563eb;
+  font-size: 16px;
+}
+
+.task-form .save-video-button:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.compose-panel {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  margin-top: 22px;
+}
+
+.task-form .compose-button {
+  width: 130px;
+  min-height: 54px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  box-shadow: 0 12px 24px rgba(79, 70, 229, 0.2);
+  font-size: 18px;
+}
+
+.task-form .compose-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, #1d4ed8, #6d28d9);
+}
+
+@media (max-width: 640px) {
+  .task-form {
+    grid-template-columns: 1fr;
+  }
+
+  .api-key-row,
+  .segment-count-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .task-form .api-key-row input,
+  .api-key-row .pixabay-link,
+  .task-form .segment-count-row input,
+  .task-form .segment-add-button {
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+  }
+
+  .segment-controls {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .segment-controls input:first-child,
+  .task-form .keyword-input,
+  .task-form .segment-button,
+  .task-form .material-button {
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    grid-column: auto;
+  }
 }
