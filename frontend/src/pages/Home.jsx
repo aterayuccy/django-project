@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
+import { BuiltInMaterialCanvas } from '../components/BuiltInMaterialCanvas';
+import { builtInObjects, builtInScenes } from '../components/builtInMaterialOptions';
 import '../styles/Home.css';
 
 const fallbackVoices = [
@@ -18,13 +20,46 @@ const createEmptySegment = () => ({
   audioUrl: '',
   duration: 0,
   size: 0,
+  materialSource: 'external',
   keyword: '',
+  builtinScene: '',
+  builtinObject: '',
+  builtinPosition: { x: 0.5, y: 0.66 },
+  builtinItems: [],
+  activeBuiltinItemId: '',
   materialStatus: 'idle',
   material: null,
   materialIds: [],
   showMaterial: false,
   error: '',
   materialError: '',
+});
+
+const getBuiltinItems = (segment) => {
+  if (Array.isArray(segment.builtinItems) && segment.builtinItems.length > 0) {
+    return segment.builtinItems;
+  }
+
+  if (segment.builtinObject) {
+    return [
+      {
+        id: 'legacy-item',
+        objectId: segment.builtinObject,
+        position: segment.builtinPosition || { x: 0.5, y: 0.66 },
+      },
+    ];
+  }
+
+  return [];
+};
+
+const createBuiltinItem = (objectId, index) => ({
+  id: crypto.randomUUID?.() || `builtin-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  objectId,
+  position: {
+    x: 0.5 + ((index % 3) - 1) * 0.13,
+    y: 0.66 + (Math.floor(index / 3) % 2) * 0.12,
+  },
 });
 
 const formatDuration = (seconds) => {
@@ -55,18 +90,21 @@ const videoFormats = [
 function Home() {
   const navigate = useNavigate();
   const [voice, setVoice] = useState(fallbackVoices[0].id);
-  const [videoFormat, setVideoFormat] = useState('long');
+  const [videoFormat, setVideoFormat] = useState('short');
   const [voices, setVoices] = useState(fallbackVoices);
   const [pixabayKey, setPixabayKey] = useState('');
-  const [extraSegmentCount, setExtraSegmentCount] = useState(0);
+  const [extraSegmentCount, setExtraSegmentCount] = useState(1);
   const [segmentCount, setSegmentCount] = useState(1);
   const [segments, setSegments] = useState([createEmptySegment()]);
   const [composeStatus, setComposeStatus] = useState('idle');
   const [composeError, setComposeError] = useState('');
   const [resultVideoUrl, setResultVideoUrl] = useState('');
   const [resultVideoBlob, setResultVideoBlob] = useState(null);
+  const [setupConfirmed, setSetupConfirmed] = useState(false);
   const segmentsRef = useRef(segments);
   const resultVideoUrlRef = useRef(resultVideoUrl);
+  const builtinCanvasRefs = useRef({});
+  const builtinMaterialRequestRefs = useRef({});
 
   useEffect(() => {
     api
@@ -173,6 +211,201 @@ function Home() {
     );
   };
 
+  const recordCanvasClip = (canvas) =>
+    new Promise((resolve, reject) => {
+      if (!canvas?.captureStream || !window.MediaRecorder) {
+        reject(new Error('此瀏覽器不支援 Canvas 素材錄製。'));
+        return;
+      }
+
+      const stream = canvas.captureStream(30);
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+        ? 'video/webm;codecs=vp9'
+        : 'video/webm';
+      const chunks = [];
+      const recorder = new MediaRecorder(stream, { mimeType });
+
+      recorder.addEventListener('dataavailable', (event) => {
+        if (event.data.size > 0) chunks.push(event.data);
+      });
+      recorder.addEventListener('error', () => reject(new Error('Canvas 素材錄製失敗。')), { once: true });
+      recorder.addEventListener(
+        'stop',
+        () => {
+          stream.getTracks().forEach((track) => track.stop());
+          resolve(new Blob(chunks, { type: mimeType }));
+        },
+        { once: true },
+      );
+
+      recorder.start();
+      window.setTimeout(() => recorder.stop(), 1200);
+    });
+
+  const saveBuiltinMaterial = async (index, segment, requestId) => {
+    const canvas = builtinCanvasRefs.current[index];
+
+    if (!canvas) {
+      updateSegmentState(index, { materialStatus: 'idle', materialError: '內建素材預覽尚未準備好。' });
+      return;
+    }
+
+    updateSegmentState(index, { materialStatus: 'rendering', material: null, materialError: '' });
+
+    try {
+      const clip = await recordCanvasClip(canvas);
+      const formData = new FormData();
+      formData.append('video', clip, `builtin-material-${Date.now()}.webm`);
+      const res = await api.post('/api/builtin-materials/', formData);
+
+      if (builtinMaterialRequestRefs.current[index] !== requestId) return;
+
+      updateSegmentState(index, {
+        materialStatus: 'ready',
+        material: { type: 'builtin', videoUrl: res.data.videoUrl, loop: true },
+        materialError: '',
+      });
+    } catch (error) {
+      if (builtinMaterialRequestRefs.current[index] !== requestId) return;
+
+      updateSegmentState(index, {
+        materialStatus: 'idle',
+        material: null,
+        materialError: error.response?.data?.detail || error.message || '內建素材儲存失敗，請再試一次。',
+      });
+    }
+  };
+
+  const scheduleBuiltinMaterialSave = (index, segment) => {
+    if (!segment.audioUrl || !segment.builtinScene || getBuiltinItems(segment).length === 0) return;
+
+    const requestId = (builtinMaterialRequestRefs.current[index] || 0) + 1;
+    builtinMaterialRequestRefs.current[index] = requestId;
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => saveBuiltinMaterial(index, segment, requestId));
+    });
+  };
+
+  const updateMaterialSource = (index, materialSource) => {
+    resetResultVideo();
+    builtinMaterialRequestRefs.current[index] = (builtinMaterialRequestRefs.current[index] || 0) + 1;
+    setSegments((currentSegments) =>
+      currentSegments.map((segment, segmentIndex) => {
+        if (segmentIndex !== index) return segment;
+
+        return {
+          ...segment,
+          materialSource,
+          materialStatus: 'idle',
+          material: null,
+          showMaterial: false,
+          materialError: '',
+        };
+      }),
+    );
+  };
+
+  const updateBuiltinMaterial = (index, changes) => {
+    const isSelectionOnly = Object.keys(changes).every((key) => key === 'activeBuiltinItemId');
+
+    if (isSelectionOnly) {
+      setSegments((currentSegments) =>
+        currentSegments.map((segment, segmentIndex) =>
+          segmentIndex === index ? { ...segment, ...changes } : segment,
+        ),
+      );
+      return;
+    }
+
+    resetResultVideo();
+    const currentSegment = segmentsRef.current[index] || segments[index];
+    const nextSegment = { ...currentSegment, ...changes, materialSource: 'builtin' };
+    const shouldSave = Boolean(
+      nextSegment.audioUrl && nextSegment.builtinScene && getBuiltinItems(nextSegment).length > 0,
+    );
+
+    builtinMaterialRequestRefs.current[index] = (builtinMaterialRequestRefs.current[index] || 0) + 1;
+    setSegments((currentSegments) =>
+      currentSegments.map((segment, segmentIndex) => {
+        if (segmentIndex !== index) return segment;
+
+        const updatedSegment = { ...segment, ...changes };
+
+        return {
+          ...updatedSegment,
+          materialSource: 'builtin',
+          materialStatus: shouldSave ? 'rendering' : 'idle',
+          material: null,
+          showMaterial: false,
+          materialError: '',
+        };
+      }),
+    );
+
+    if (shouldSave) scheduleBuiltinMaterialSave(index, nextSegment);
+  };
+
+  const addBuiltinObject = (index, objectId) => {
+    const currentItems = getBuiltinItems(segmentsRef.current[index] || segments[index]);
+    const item = createBuiltinItem(objectId, currentItems.length);
+    updateBuiltinMaterial(index, {
+      builtinItems: [...currentItems, item],
+      activeBuiltinItemId: item.id,
+      builtinObject: '',
+    });
+  };
+
+  const beginBuiltinObjectDrag = (index, itemId) => {
+    resetResultVideo();
+    setSegments((currentSegments) =>
+      currentSegments.map((segment, segmentIndex) =>
+        segmentIndex === index
+          ? {
+              ...segment,
+              activeBuiltinItemId: itemId,
+              materialStatus: 'editing',
+              material: null,
+              materialError: '',
+            }
+          : segment,
+      ),
+    );
+  };
+
+  const previewBuiltinObjectMove = (index, itemId, position) => {
+    setSegments((currentSegments) =>
+      currentSegments.map((segment, segmentIndex) => {
+        if (segmentIndex !== index) return segment;
+
+        return {
+          ...segment,
+          builtinItems: getBuiltinItems(segment).map((item) =>
+            item.id === itemId ? { ...item, position } : item,
+          ),
+          activeBuiltinItemId: itemId,
+        };
+      }),
+    );
+  };
+
+  const commitBuiltinObjectMove = (index, itemId, position) => {
+    const builtinItems = getBuiltinItems(segmentsRef.current[index] || segments[index]).map((item) =>
+      item.id === itemId ? { ...item, position } : item,
+    );
+    updateBuiltinMaterial(index, { builtinItems, activeBuiltinItemId: itemId, builtinObject: '' });
+  };
+
+  const removeBuiltinObject = (index, itemId) => {
+    const builtinItems = getBuiltinItems(segmentsRef.current[index] || segments[index]).filter(
+      (item) => item.id !== itemId,
+    );
+    updateBuiltinMaterial(index, {
+      builtinItems,
+      activeBuiltinItemId: builtinItems.at(-1)?.id || '',
+      builtinObject: '',
+    });
+  };
+
   const updateSegmentState = (index, nextValues) => {
     setSegments((currentSegments) =>
       currentSegments.map((segment, segmentIndex) =>
@@ -207,18 +440,25 @@ function Home() {
       );
       const audioUrl = URL.createObjectURL(res.data);
       const duration = await getAudioDuration(audioUrl);
+      const nextSegment = { ...segment, audioUrl, duration };
+      const shouldSaveBuiltinMaterial =
+        nextSegment.materialSource === 'builtin' &&
+        nextSegment.builtinScene &&
+        getBuiltinItems(nextSegment).length > 0;
 
       updateSegmentState(index, {
         status: 'ready',
         audioUrl,
         duration,
         size: res.data.size,
-        materialStatus: 'idle',
+        materialStatus: shouldSaveBuiltinMaterial ? 'rendering' : 'idle',
         material: null,
         showMaterial: false,
         error: '',
         materialError: '',
       });
+
+      if (shouldSaveBuiltinMaterial) scheduleBuiltinMaterialSave(index, nextSegment);
     } catch (error) {
       let errorMessage = '音檔生成失敗，請稍後再試。';
 
@@ -308,7 +548,12 @@ function Home() {
     setComposeError('');
 
     const invalidSegmentIndex = segments.findIndex(
-      (segment) => !segment.text.trim() || !segment.audioUrl || !segment.material?.videoUrl,
+      (segment) =>
+        !segment.text.trim() ||
+        !segment.audioUrl ||
+        (segment.materialSource === 'builtin'
+          ? !segment.builtinScene || getBuiltinItems(segment).length === 0 || !segment.material?.videoUrl
+          : !segment.material?.videoUrl),
     );
 
     if (invalidSegmentIndex >= 0) {
@@ -326,7 +571,11 @@ function Home() {
           segments: segments.map((segment) => ({
             text: segment.text,
             duration: segment.duration,
-            videoUrl: segment.material.videoUrl,
+            materialType: segment.materialSource,
+            videoUrl: segment.material?.videoUrl || '',
+            loopMaterial: segment.materialSource === 'builtin',
+            builtinScene: segment.builtinScene,
+            builtinItems: getBuiltinItems(segment),
           })),
         },
         { responseType: 'blob' },
@@ -381,20 +630,23 @@ function Home() {
     const nextValue = Number(value);
 
     if (Number.isNaN(nextValue)) {
-      setExtraSegmentCount(0);
+      setExtraSegmentCount(1);
       return;
     }
 
-    setExtraSegmentCount(Math.min(20, Math.max(0, nextValue)));
+    setExtraSegmentCount(Math.min(20, Math.max(1, nextValue)));
+    setSetupConfirmed(false);
   };
 
-  const applySegmentCount = () => {
-    const nextSegmentCount = extraSegmentCount + 1;
+  const showSegmentEditor = () => {
+    const nextSegmentCount = extraSegmentCount;
 
-    if (nextSegmentCount === segmentCount) return;
+    if (nextSegmentCount !== segmentCount) {
+      resetResultVideo();
+      setSegmentCount(nextSegmentCount);
+    }
 
-    resetResultVideo();
-    setSegmentCount(nextSegmentCount);
+    setSetupConfirmed(true);
   };
 
   const getMaterialButtonText = (segment) => {
@@ -420,26 +672,22 @@ function Home() {
     event.currentTarget.currentTime = 0;
   };
 
+  const areSegmentsReadyToCompose =
+    segments.length > 0 &&
+    segments.every(
+      (segment) =>
+        segment.status === 'ready' &&
+        Boolean(segment.audioUrl) &&
+        segment.materialStatus === 'ready' &&
+        (segment.materialSource === 'builtin'
+          ? Boolean(segment.builtinScene && getBuiltinItems(segment).length > 0 && segment.material?.videoUrl)
+          : Boolean(segment.material?.videoUrl)),
+    );
+
   return (
     <main className="workspace-page">
       <section className="task-form">
-        <aside className="settings-panel">
-          <label htmlFor="videoFormat">選擇影片尺寸</label>
-          <select
-            id="videoFormat"
-            name="videoFormat"
-            value={videoFormat}
-            onChange={(e) => {
-              resetResultVideo();
-              setVideoFormat(e.target.value);
-            }}
-          >
-            {videoFormats.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
+        {!setupConfirmed && <aside className="settings-panel">
           <label htmlFor="voice">選擇聲音</label>
           <select
             id="voice"
@@ -458,28 +706,26 @@ function Home() {
             ))}
           </select>
 
-          <label htmlFor="pixabayKey">登入 Pixabay</label>
-          <div className="api-key-row">
-            <input
-              type="password"
-              id="pixabayKey"
-              name="pixabayKey"
-              value={pixabayKey}
-              onChange={(e) => setPixabayKey(e.target.value)}
-              placeholder="輸入 Pixabay API Key"
-              autoComplete="off"
-            />
-            <a
-              className="pixabay-link"
-              href="https://pixabay.com/api/docs/"
-              target="_blank"
-              rel="noreferrer"
-            >
-              登入
-            </a>
-          </div>
+          <label htmlFor="pixabayKey">請輸入 Pixabay API Key</label>
+          <input
+            type="password"
+            id="pixabayKey"
+            name="pixabayKey"
+            value={pixabayKey}
+            onChange={(e) => setPixabayKey(e.target.value)}
+            placeholder="Pixabay API Key"
+            autoComplete="off"
+          />
+          <a
+            className="pixabay-link"
+            href="https://pixabay.com/api/docs/"
+            target="_blank"
+            rel="noreferrer"
+          >
+            登入 Pixabay 以獲取 API Key
+          </a>
 
-          <label htmlFor="segmentCount">新增片段數量</label>
+          <label htmlFor="segmentCount">選擇片段數量</label>
           <div className="segment-count-row">
             <input
               type="number"
@@ -487,17 +733,35 @@ function Home() {
               name="segmentCount"
               value={extraSegmentCount}
               onChange={(e) => handleExtraSegmentCount(e.target.value)}
-              min="0"
+              min="1"
               max="20"
               step="1"
             />
-            <button type="button" className="segment-add-button" onClick={applySegmentCount}>
-              新增
-            </button>
           </div>
-        </aside>
 
-        <section className="work-panel">
+          <label htmlFor="videoFormat">選擇影片尺寸</label>
+          <select
+            id="videoFormat"
+            name="videoFormat"
+            value={videoFormat}
+            onChange={(e) => {
+              resetResultVideo();
+              setSetupConfirmed(false);
+              setVideoFormat(e.target.value);
+            }}
+          >
+            {videoFormats.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+          <button type="button" className="next-step-button" onClick={showSegmentEditor}>
+            下一步
+          </button>
+        </aside>}
+
+        {setupConfirmed && <section className="work-panel">
           <div className="segment-list">
             {segments.map((segment, index) => (
               <div className="segment-row" key={index}>
@@ -522,21 +786,133 @@ function Home() {
                         ? `${formatDuration(segment.duration)} / ${formatFileSize(segment.size)}`
                         : '生成音檔'}
                   </button>
-                  <input
-                    type="text"
-                    className="keyword-input"
-                    value={segment.keyword}
-                    onChange={(e) => updateSegmentKeyword(index, e.target.value)}
-                    placeholder="關鍵字"
-                  />
-                  <button
-                    type="button"
-                    className="material-button"
-                    onClick={() => searchMaterial(index)}
-                    disabled={segment.materialStatus === 'searching'}
+                </div>
+                <div className="material-source-area">
+                  <label htmlFor={`material-source-${index}`}>選擇素材</label>
+                  <select
+                    id={`material-source-${index}`}
+                    value={segment.materialSource}
+                    onChange={(e) => updateMaterialSource(index, e.target.value)}
                   >
-                    {getMaterialButtonText(segment)}
-                  </button>
+                    <option value="external">外部素材</option>
+                    <option value="builtin">內建素材</option>
+                  </select>
+
+                  {segment.materialSource === 'external' ? (
+                    <div className="external-material-controls">
+                      <input
+                        type="text"
+                        className="keyword-input"
+                        value={segment.keyword}
+                        onChange={(e) => updateSegmentKeyword(index, e.target.value)}
+                        placeholder="關鍵字"
+                      />
+                      <button
+                        type="button"
+                        className="material-button"
+                        onClick={() => searchMaterial(index)}
+                        disabled={segment.materialStatus === 'searching'}
+                      >
+                        {getMaterialButtonText(segment)}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="builtin-material-editor">
+                      <p className="material-picker-title">選擇場景</p>
+                      <div className="material-choice-grid material-choice-grid--scenes">
+                        {builtInScenes.map((scene) => (
+                          <button
+                            type="button"
+                            key={scene.id}
+                            className={`material-choice ${segment.builtinScene === scene.id ? 'is-selected' : ''}`}
+                            onClick={() => updateBuiltinMaterial(index, { builtinScene: scene.id })}
+                          >
+                            <BuiltInMaterialCanvas
+                              sceneId={scene.id}
+                              videoFormat={videoFormat}
+                              animate={false}
+                              className="material-choice-canvas"
+                            />
+                            <span>{scene.name}</span>
+                          </button>
+                        ))}
+                      </div>
+
+                      {segment.builtinScene && (
+                        <>
+                          <p className="material-picker-title">選擇物件</p>
+                          <div className="material-choice-grid material-choice-grid--objects">
+                            {builtInObjects.map((object) => (
+                              <button
+                                type="button"
+                                key={object.id}
+                                className="material-choice"
+                                onClick={() => addBuiltinObject(index, object.id)}
+                              >
+                                <BuiltInMaterialCanvas
+                                  sceneId="studio"
+                                  objectId={object.id}
+                                  position={{ x: 0.5, y: 0.62 }}
+                                  videoFormat={videoFormat}
+                                  className="material-choice-canvas"
+                                />
+                                <span>{object.name}</span>
+                                <small>{object.motion}</small>
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+
+                      {segment.builtinScene && getBuiltinItems(segment).length > 0 && (
+                        <div className={`builtin-material-preview builtin-material-preview--${videoFormat}`}>
+                          <p>點擊物件可選取，點擊畫面可移動已選物件</p>
+                          <div className="builtin-canvas-stage">
+                            <BuiltInMaterialCanvas
+                              sceneId={segment.builtinScene}
+                              items={getBuiltinItems(segment)}
+                              videoFormat={videoFormat}
+                              interactive
+                              onCanvasReady={(canvas) => {
+                                builtinCanvasRefs.current[index] = canvas;
+                              }}
+                              onActiveItemChange={(activeBuiltinItemId) =>
+                                updateBuiltinMaterial(index, { activeBuiltinItemId })
+                              }
+                              onItemDragStart={(itemId) => beginBuiltinObjectDrag(index, itemId)}
+                              onItemPositionChange={(itemId, position) =>
+                                previewBuiltinObjectMove(index, itemId, position)
+                              }
+                              onItemPositionCommit={(itemId, position) =>
+                                commitBuiltinObjectMove(index, itemId, position)
+                              }
+                              className="builtin-material-canvas"
+                            />
+                            {getBuiltinItems(segment).map((item) => (
+                              <div
+                                className={`builtin-object-outline ${segment.activeBuiltinItemId === item.id ? 'is-active' : ''}`}
+                                key={item.id}
+                                style={{ left: `${item.position.x * 100}%`, top: `${item.position.y * 100}%` }}
+                              >
+                                <button
+                                  type="button"
+                                  className="builtin-object-delete"
+                                  aria-label="刪除物件"
+                                  onPointerDown={(event) => event.stopPropagation()}
+                                  onClick={() => removeBuiltinObject(index, item.id)}
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {segment.materialStatus === 'rendering' && (
+                        <p className="builtin-material-status">正在儲存內建素材...</p>
+                      )}
+                    </div>
+                  )}
                 </div>
                 {segment.error && <p className="segment-error">{segment.error}</p>}
                 {segment.materialError && <p className="segment-error">{segment.materialError}</p>}
@@ -565,14 +941,26 @@ function Home() {
           </div>
 
           <div className="compose-panel">
-            <button
-              type="button"
-              className="compose-button"
-              onClick={composeVideo}
-              disabled={composeStatus === 'composing'}
-            >
-              {composeStatus === 'composing' ? '合成中...' : '合成影片'}
-            </button>
+            <div className="compose-actions">
+              <button
+                type="button"
+                className="back-step-button"
+                onClick={() => setSetupConfirmed(false)}
+                disabled={composeStatus === 'composing'}
+              >
+                上一步
+              </button>
+              {areSegmentsReadyToCompose && (
+                <button
+                  type="button"
+                  className="compose-button"
+                  onClick={composeVideo}
+                  disabled={composeStatus === 'composing'}
+                >
+                  {composeStatus === 'composing' ? '合成中...' : '合成影片'}
+                </button>
+              )}
+            </div>
             {composeError && <p className="segment-error">{composeError}</p>}
             {resultVideoUrl && (
               <div className={`result-preview result-preview--${videoFormat}`}>
@@ -583,7 +971,7 @@ function Home() {
               </div>
             )}
           </div>
-        </section>
+        </section>}
       </section>
     </main>
   );

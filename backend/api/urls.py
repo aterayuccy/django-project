@@ -7,6 +7,7 @@ urlpatterns=[
     path("tts/voices/",views.tts_voices,name="tts-voices"),
     path("tts/",views.text_to_speech,name="text-to-speech"),
     path("pixabay/video/",views.search_pixabay_video,name="search-pixabay-video"),
+    path("builtin-materials/",views.upload_builtin_material,name="upload-builtin-material"),
     path("video/compose/",views.compose_video,name="compose-video"),
     path("videos/",views.SavedVideoListCreate.as_view(),name="saved-video-list"),
     path("videos/delete/<int:pk>/",views.SavedVideoDelete.as_view(),name="delete-saved-video"),

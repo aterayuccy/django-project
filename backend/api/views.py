@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 import os
 import tempfile
 import uuid
@@ -8,7 +9,9 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from django.conf import settings
 from django.contrib.auth.models import User
+from django.core.files.storage import default_storage
 from django.http import HttpResponse
 from rest_framework import generics, status
 from rest_framework.decorators import api_view, parser_classes, permission_classes
@@ -33,6 +36,8 @@ VIDEO_FORMATS = {
         "subtitle_max_chars": 24,
     },
 }
+BUILTIN_SCENE_IDS = {"classroom", "bedroom", "garden", "beach", "cafe", "forest", "rooftop", "studio"}
+BUILTIN_OBJECT_IDS = {"cat", "tree", "balloon", "fish", "rocket", "lamp", "cloud", "flower"}
 TARGET_VIDEO_SIZE = VIDEO_FORMATS["long"]["size"]
 SUBTITLE_FONT_PATH = Path(r"C:\Windows\Fonts\msjh.ttc")
 SUBTITLE_MAX_CHARS_PER_LINE = 24
@@ -187,6 +192,151 @@ def format_subtitle_text(text, max_chars_per_line=SUBTITLE_MAX_CHARS_PER_LINE):
     return "\n".join(lines)
 
 
+def normalize_builtin_position(position):
+    if not isinstance(position, dict):
+        return 0.5, 0.66
+
+    try:
+        x = float(position.get("x", 0.5))
+        y = float(position.get("y", 0.66))
+    except (TypeError, ValueError):
+        return 0.5, 0.66
+
+    return min(0.88, max(0.12, x)), min(0.86, max(0.16, y))
+
+
+def draw_builtin_scene(draw, width, height, scene_id):
+    horizon = int(height * 0.58)
+    palettes = {
+        "classroom": ("#dbeafe", "#b7794a"),
+        "bedroom": ("#fde68a", "#c08457"),
+        "garden": ("#93c5fd", "#86efac"),
+        "beach": ("#7dd3fc", "#fde68a"),
+        "cafe": ("#f5e6d3", "#9a6b49"),
+        "forest": ("#bfdbfe", "#4ade80"),
+        "rooftop": ("#312e81", "#1e293b"),
+        "studio": ("#e2e8f0", "#cbd5e1"),
+    }
+    sky, ground = palettes.get(scene_id, palettes["studio"])
+    draw.rectangle((0, 0, width, horizon), fill=sky)
+    draw.rectangle((0, horizon, width, height), fill=ground)
+
+    if scene_id == "classroom":
+        draw.rectangle((int(width * 0.2), int(height * 0.16), int(width * 0.8), int(height * 0.39)), fill="#334155")
+        for column in range(3):
+            for row in range(2):
+                x = int(width * (0.14 + column * 0.26))
+                y = int(height * (0.64 + row * 0.16))
+                draw.rectangle((x, y, x + int(width * 0.17), y + int(height * 0.055)), fill="#8b5e3c")
+    elif scene_id == "bedroom":
+        draw.rectangle((int(width * 0.17), int(height * 0.6), int(width * 0.83), int(height * 0.83)), fill="#a78bfa")
+        draw.rectangle((int(width * 0.18), int(height * 0.56), int(width * 0.4), int(height * 0.65)), fill="#f8fafc")
+        draw.rectangle((int(width * 0.1), int(height * 0.18), int(width * 0.3), int(height * 0.44)), fill="#93c5fd")
+    elif scene_id == "garden":
+        draw.ellipse((int(width * 0.74), int(height * 0.1), int(width * 0.9), int(height * 0.26)), fill="#fef3c7")
+        for index in range(6):
+            x = int(width * (0.02 + index * 0.18))
+            draw.ellipse((x, int(height * 0.43), x + int(width * 0.2), int(height * 0.65)), fill="#65a30d")
+    elif scene_id == "beach":
+        draw.rectangle((0, int(height * 0.42), width, int(height * 0.67)), fill="#38bdf8")
+        for index in range(4):
+            y = int(height * (0.48 + index * 0.045))
+            draw.arc((0, y - 12, width, y + 12), 180, 360, fill="#e0f2fe", width=max(2, int(height * 0.006)))
+    elif scene_id == "cafe":
+        draw.rectangle((0, int(height * 0.54), width, int(height * 0.66)), fill="#7c2d12")
+        for x in (0.12, 0.54):
+            draw.rectangle((int(width * x), int(height * 0.16), int(width * (x + 0.34)), int(height * 0.44)), fill="#dbeafe")
+    elif scene_id == "forest":
+        for index in range(7):
+            x = int(width * (0.03 + index * 0.15))
+            draw.rectangle((x, int(height * 0.3), x + int(width * 0.045), int(height * 0.72)), fill="#7c4a2d")
+            draw.ellipse((x - int(width * 0.09), int(height * 0.12), x + int(width * 0.13), int(height * 0.42)), fill="#166534")
+    elif scene_id == "rooftop":
+        draw.ellipse((int(width * 0.71), int(height * 0.13), int(width * 0.85), int(height * 0.27)), fill="#fef3c7")
+        for index in range(8):
+            x = int(width * index * 0.14)
+            draw.rectangle((x, int(height * (0.42 + (index % 3) * 0.05)), x + int(width * 0.12), horizon), fill="#0f172a")
+    elif scene_id == "studio":
+        for index in range(5):
+            draw.line(
+                (int(width * (0.1 + index * 0.2)), 0, int(width * (0.3 + index * 0.15)), int(height * 0.72)),
+                fill="#94a3b8",
+                width=max(2, int(width * 0.004)),
+            )
+
+
+def draw_builtin_object(draw, width, height, object_id, position, time):
+    x = int(position[0] * width)
+    y = int(position[1] * height)
+    size = int(min(width, height) * 0.17)
+    wave = math.sin(time * 4)
+
+    if object_id == "cat":
+        draw.ellipse((x - size // 3, y - size // 3, x + size // 3, y + size // 3), fill="#f59e0b")
+        draw.ellipse((x + size // 16, y - size // 2, x + size // 2, y - size // 16), fill="#fbbf24")
+        tail_end_x = x - int(size * (0.62 + wave * 0.12))
+        tail_end_y = y - int(size * (0.3 + wave * 0.38))
+        draw.line((x - size // 4, y, tail_end_x, tail_end_y), fill="#f59e0b", width=max(5, size // 9))
+        draw.ellipse((x + size // 8, y - int(size * 0.33), x + int(size * 0.18), y - int(size * 0.23)), fill="#111827")
+    elif object_id == "tree":
+        draw.rectangle((x - size // 10, y - size // 10, x + size // 10, y + int(size * 0.62)), fill="#92400e")
+        for index in range(3):
+            offset = int(wave * size * 0.04)
+            leaf_x = x + int((index - 1) * size * 0.22) + offset
+            leaf_y = y - int(size * (0.45 + (index % 2) * 0.14))
+            draw.ellipse((leaf_x - size // 4, leaf_y - size // 4, leaf_x + size // 4, leaf_y + size // 4), fill="#22c55e")
+    elif object_id == "balloon":
+        draw.ellipse((x - int(size * 0.3), y - int(size * 0.52), x + int(size * 0.3), y + int(size * 0.08)), fill="#f43f5e")
+        draw.arc((x - int(size * 0.15), y, x + int(size * 0.15), y + int(size * 0.7)), 0, 180, fill="#475569", width=max(2, size // 40))
+    elif object_id == "fish":
+        draw.ellipse((x - int(size * 0.36), y - int(size * 0.2), x + int(size * 0.36), y + int(size * 0.2)), fill="#38bdf8")
+        tail = int(wave * size * 0.12)
+        draw.polygon(((x - int(size * 0.35), y), (x - int(size * 0.65), y - int(size * 0.22) + tail), (x - int(size * 0.65), y + int(size * 0.22) - tail)), fill="#0284c7")
+        draw.ellipse((x + int(size * 0.15), y - int(size * 0.08), x + int(size * 0.21), y - int(size * 0.02)), fill="#0f172a")
+    elif object_id == "rocket":
+        draw.ellipse((x - int(size * 0.2), y - int(size * 0.45), x + int(size * 0.2), y + int(size * 0.45)), fill="#e2e8f0")
+        flame = int(size * (0.55 + (wave + 1) * 0.1))
+        draw.polygon(((x, y + int(size * 0.42)), (x - int(size * 0.11), y + flame), (x + int(size * 0.11), y + flame)), fill="#f97316")
+        draw.ellipse((x - int(size * 0.075), y - int(size * 0.2), x + int(size * 0.075), y - int(size * 0.05)), fill="#38bdf8")
+    elif object_id == "lamp":
+        glow = int(size * (0.3 + (wave + 1) * 0.08))
+        draw.ellipse((x - glow, y - glow, x + glow, y + glow), fill="#fef3c7")
+        draw.rectangle((x - size // 24, y, x + size // 24, y + int(size * 0.52)), fill="#64748b")
+        draw.polygon(((x - int(size * 0.28), y), (x + int(size * 0.28), y), (x + int(size * 0.16), y - int(size * 0.36)), (x - int(size * 0.16), y - int(size * 0.36))), fill="#facc15")
+    elif object_id == "cloud":
+        for offset_x, offset_y, radius in ((-0.2, 0, 0.22), (0, -0.12, 0.28), (0.23, 0, 0.22)):
+            draw.ellipse((x + int(size * (offset_x - radius)), y + int(size * (offset_y - radius)), x + int(size * (offset_x + radius)), y + int(size * (offset_y + radius))), fill="#f8fafc")
+        for index in range(3):
+            drop = int(((time * 0.55 + index * 0.25) % 1) * size * 0.55)
+            drop_x = x + int((index - 1) * size * 0.16)
+            draw.line((drop_x, y + int(size * 0.18) + drop, drop_x, y + int(size * 0.32) + drop), fill="#60a5fa", width=max(2, size // 30))
+    else:
+        draw.line((x, y + int(size * 0.5), x + int(wave * size * 0.08), y - int(size * 0.1)), fill="#16a34a", width=max(3, size // 18))
+        for index in range(6):
+            angle = math.tau * index / 6 + wave * 0.13
+            petal_x = x + int(math.cos(angle) * size * 0.2)
+            petal_y = y - int(size * 0.1) + int(math.sin(angle) * size * 0.2)
+            draw.ellipse((petal_x - size // 9, petal_y - size // 9, petal_x + size // 9, petal_y + size // 9), fill="#f472b6")
+        draw.ellipse((x - size // 10, y - int(size * 0.2), x + size // 10, y), fill="#facc15")
+
+
+def create_builtin_video_clip(target_size, duration, scene_id, object_id, position):
+    from PIL import Image, ImageDraw
+    import numpy as np
+    from moviepy import VideoClip
+
+    width, height = target_size
+
+    def make_frame(time):
+        image = Image.new("RGB", (width, height), "#e2e8f0")
+        draw = ImageDraw.Draw(image)
+        draw_builtin_scene(draw, width, height, scene_id)
+        draw_builtin_object(draw, width, height, object_id, position, time)
+        return np.asarray(image)
+
+    return VideoClip(frame_function=make_frame, duration=duration)
+
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def tts_voices(request):
@@ -313,6 +463,26 @@ def search_pixabay_video(request):
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser])
+def upload_builtin_material(request):
+    video_file = request.FILES.get("video")
+
+    if not video_file:
+        return Response({"detail": "缺少內建素材影片。"}, status=status.HTTP_400_BAD_REQUEST)
+
+    if video_file.size > 20 * 1024 * 1024:
+        return Response({"detail": "內建素材影片不可超過 20 MB。"}, status=status.HTTP_400_BAD_REQUEST)
+
+    storage_name = default_storage.save(
+        f"builtin_materials/{request.user.pk}/{uuid.uuid4().hex}.webm",
+        video_file,
+    )
+    media_path = f"{settings.MEDIA_URL.rstrip('/')}/{storage_name}"
+    return Response({"videoUrl": request.build_absolute_uri(media_path)})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def compose_video(request):
     voice = request.data.get("voice", "zh-TW-HsiaoChenNeural")
     video_format = request.data.get("video_format", "long")
@@ -331,6 +501,26 @@ def compose_video(request):
     for index, segment in enumerate(segments, start=1):
         if not segment.get("text", "").strip():
             return Response({"detail": f"片段 {index} 缺少旁白內容。"}, status=status.HTTP_400_BAD_REQUEST)
+
+        material_type = segment.get("materialType", "external")
+
+        if material_type not in {"external", "builtin"}:
+            return Response({"detail": f"片段 {index} 的素材類型無效。"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if material_type == "builtin":
+            if segment.get("builtinScene") not in BUILTIN_SCENE_IDS:
+                return Response({"detail": f"片段 {index} 尚未選擇內建場景。"}, status=status.HTTP_400_BAD_REQUEST)
+
+            builtin_items = segment.get("builtinItems", [])
+
+            if not isinstance(builtin_items, list) or not builtin_items:
+                return Response({"detail": f"片段 {index} 尚未選擇內建物件。"}, status=status.HTTP_400_BAD_REQUEST)
+
+            if any(
+                not isinstance(item, dict) or item.get("objectId") not in BUILTIN_OBJECT_IDS
+                for item in builtin_items
+            ):
+                return Response({"detail": f"片段 {index} 包含不支援的內建物件。"}, status=status.HTTP_400_BAD_REQUEST)
 
         if not segment.get("videoUrl"):
             return Response({"detail": f"片段 {index} 尚未選擇素材。"}, status=status.HTTP_400_BAD_REQUEST)
@@ -352,20 +542,34 @@ def compose_video(request):
             try:
                 for index, segment in enumerate(segments, start=1):
                     text = segment.get("text", "").strip()
-                    video_url = segment["videoUrl"]
                     audio_path = temp_path / f"audio_{index}.mp3"
-                    video_path = temp_path / f"video_{index}.mp4"
 
                     audio_path.write_bytes(asyncio.run(synthesize_tts_audio(text, voice)))
-                    download_file(video_url, video_path)
-
                     audio_clip = AudioFileClip(str(audio_path))
-                    video_clip = VideoFileClip(str(video_path))
-                    clip_duration = min(audio_clip.duration, video_clip.duration)
                     target_size = video_settings["size"]
+                    material_type = segment.get("materialType", "external")
+                    video_path = temp_path / f"video_{index}.webm"
+                    download_file(segment["videoUrl"], video_path)
+                    video_clip = VideoFileClip(str(video_path))
                     fitted_video_clip, fitted_resources = fit_video_clip_to_canvas(video_clip, target_size)
 
-                    base_clip = fitted_video_clip.subclipped(0, clip_duration).with_audio(
+                    if material_type == "builtin" and segment.get("loopMaterial"):
+                        if video_clip.duration <= 0:
+                            raise RuntimeError(f"片段 {index} 的內建素材影片無法播放。")
+
+                        clip_duration = audio_clip.duration
+                        loop_count = max(1, math.ceil(clip_duration / video_clip.duration))
+                        looped_material_clip = concatenate_videoclips(
+                            [fitted_video_clip] * loop_count,
+                            method="chain",
+                        ).subclipped(0, clip_duration)
+                        fitted_resources.append(looped_material_clip)
+                        base_material_clip = looped_material_clip
+                    else:
+                        clip_duration = min(audio_clip.duration, video_clip.duration)
+                        base_material_clip = fitted_video_clip
+
+                    base_clip = base_material_clip.subclipped(0, clip_duration).with_audio(
                         audio_clip.subclipped(0, clip_duration)
                     )
                     subtitle_text_clip = TextClip(
@@ -390,12 +594,15 @@ def compose_video(request):
                         .with_duration(clip_duration)
                     )
                     clips.append(clip)
+                    video_resources = [video_clip, *fitted_resources]
+
+                    if fitted_video_clip is not video_clip:
+                        video_resources.append(fitted_video_clip)
+
                     resources.extend(
                         [
                             audio_clip,
-                            video_clip,
-                            *fitted_resources,
-                            fitted_video_clip,
+                            *video_resources,
                             base_clip,
                             subtitle_text_clip,
                             subtitle_clip,
