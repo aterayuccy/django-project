@@ -1,9 +1,9 @@
 import asyncio
 import json
 import math
-import os
 import tempfile
 import uuid
+from functools import lru_cache
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -25,27 +25,24 @@ from .serializers import NoteSerializer, SavedVideoSerializer, UserSerializer
 VIDEO_FORMATS = {
     "short": {
         "size": (720, 1280),
-        "subtitle_top": 1135,
+        "subtitle_top": 1070,
         "subtitle_width": 640,
-        "subtitle_max_chars": 14,
     },
     "long": {
         "size": (1280, 720),
-        "subtitle_top": 630,
+        "subtitle_top": 570,
         "subtitle_width": 1120,
-        "subtitle_max_chars": 24,
     },
 }
 BUILTIN_SCENE_IDS = {"classroom", "bedroom", "garden", "beach", "cafe", "forest", "rooftop", "studio"}
 BUILTIN_OBJECT_IDS = {"cat", "tree", "balloon", "fish", "rocket", "lamp", "cloud", "flower"}
 TARGET_VIDEO_SIZE = VIDEO_FORMATS["long"]["size"]
 SUBTITLE_FONT_PATH = Path(r"C:\Windows\Fonts\msjh.ttc")
-SUBTITLE_MAX_CHARS_PER_LINE = 24
 SUBTITLE_MAX_LINES = 2
-SUBTITLE_TOP_POSITION = 630
 SUBTITLE_FONT_SIZE = 36
 SUBTITLE_HORIZONTAL_MARGIN = 24
 SUBTITLE_VERTICAL_MARGIN = 18
+SUBTITLE_STROKE_WIDTH = 3
 
 
 class NoteListCreate(generics.ListCreateAPIView):
@@ -113,7 +110,7 @@ class SavedVideoDelete(generics.DestroyAPIView):
         return SavedVideo.objects.filter(author=self.request.user)
 
 
-class CreatUserView(generics.ListCreateAPIView):
+class CreatUserView(generics.CreateAPIView):
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [AllowAny]
@@ -178,18 +175,99 @@ def fit_video_clip_to_canvas(video_clip, target_size=TARGET_VIDEO_SIZE):
     return cropped_clip, [resized_clip]
 
 
-def format_subtitle_text(text, max_chars_per_line=SUBTITLE_MAX_CHARS_PER_LINE):
+@lru_cache(maxsize=4)
+def get_subtitle_font(font_size=SUBTITLE_FONT_SIZE):
+    from PIL import ImageFont
+
+    if SUBTITLE_FONT_PATH.exists():
+        return ImageFont.truetype(str(SUBTITLE_FONT_PATH), font_size)
+
+    try:
+        return ImageFont.load_default(size=font_size)
+    except TypeError:
+        return ImageFont.load_default()
+
+
+def measure_subtitle_text(text, font_size=SUBTITLE_FONT_SIZE):
+    font = get_subtitle_font(font_size)
+    return font.getlength(text) + (SUBTITLE_STROKE_WIDTH * 2)
+
+
+def split_subtitle_pages(text, max_line_width, measure_text=None):
+    """Fill each rendered line by pixel width, then group lines into subtitle pages."""
     clean_text = " ".join(text.split())
-    lines = [
-        clean_text[index : index + max_chars_per_line]
-        for index in range(0, len(clean_text), max_chars_per_line)
+
+    if not clean_text:
+        return []
+
+    if max_line_width <= 0:
+        raise ValueError("max_line_width must be greater than zero")
+
+    measure = measure_text or measure_subtitle_text
+    lines = []
+    current_line = ""
+
+    for word in clean_text.split(" "):
+        candidate = f"{current_line} {word}".strip()
+
+        if measure(candidate) <= max_line_width:
+            current_line = candidate
+            continue
+
+        if current_line:
+            lines.append(current_line)
+            current_line = ""
+
+        if measure(word) <= max_line_width:
+            current_line = word
+            continue
+
+        # Chinese text and unusually long words may not contain spaces. Split
+        # those tokens only when their actual rendered width exceeds the box.
+        token_line = ""
+
+        for character in word:
+            token_candidate = f"{token_line}{character}"
+
+            if token_line and measure(token_candidate) > max_line_width:
+                lines.append(token_line)
+                token_line = character
+            else:
+                token_line = token_candidate
+
+        current_line = token_line
+
+    if current_line:
+        lines.append(current_line)
+
+    return [
+        "\n".join(lines[index : index + SUBTITLE_MAX_LINES])
+        for index in range(0, len(lines), SUBTITLE_MAX_LINES)
     ]
 
-    if len(lines) > SUBTITLE_MAX_LINES:
-        lines = lines[:SUBTITLE_MAX_LINES]
-        lines[-1] = f"{lines[-1].rstrip()}..."
 
-    return "\n".join(lines)
+def build_subtitle_cues(text, clip_duration, max_line_width, measure_text=None):
+    """Distribute complete subtitle pages across the spoken clip duration."""
+    pages = split_subtitle_pages(text, max_line_width, measure_text)
+
+    if not pages or clip_duration <= 0:
+        return []
+
+    weights = [max(1, len(page.replace("\n", "").replace(" ", ""))) for page in pages]
+    total_weight = sum(weights)
+    cues = []
+    start = 0.0
+
+    for index, (page, weight) in enumerate(zip(pages, weights)):
+        end = (
+            clip_duration
+            if index == len(pages) - 1
+            else start + (clip_duration * weight / total_weight)
+        )
+        cues.append({"text": page, "start": start, "duration": end - start})
+        start = end
+
+    return cues
 
 
 def normalize_builtin_position(position):
@@ -384,7 +462,7 @@ def choose_video_file(video_files):
 def search_pixabay_video(request):
     keyword = request.data.get("keyword", "").strip()
     min_duration = float(request.data.get("min_duration") or 0)
-    api_key = request.data.get("pixabay_key", "").strip() or os.getenv("PIXABAY_API_KEY")
+    api_key = settings.PIXABAY_API_KEY
     exclude_ids = request.data.get("exclude_ids", [])
 
     if not isinstance(exclude_ids, list):
@@ -399,7 +477,7 @@ def search_pixabay_video(request):
         return Response({"detail": "請先生成音檔，才能依照音檔長度選擇素材。"}, status=status.HTTP_400_BAD_REQUEST)
 
     if not api_key:
-        return Response({"detail": "請先輸入 Pixabay API Key。"}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"detail": "後端尚未設定 Pixabay API Key。"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
     params = urlencode(
         {
@@ -511,17 +589,6 @@ def compose_video(request):
             if segment.get("builtinScene") not in BUILTIN_SCENE_IDS:
                 return Response({"detail": f"片段 {index} 尚未選擇內建場景。"}, status=status.HTTP_400_BAD_REQUEST)
 
-            builtin_items = segment.get("builtinItems", [])
-
-            if not isinstance(builtin_items, list) or not builtin_items:
-                return Response({"detail": f"片段 {index} 尚未選擇內建物件。"}, status=status.HTTP_400_BAD_REQUEST)
-
-            if any(
-                not isinstance(item, dict) or item.get("objectId") not in BUILTIN_OBJECT_IDS
-                for item in builtin_items
-            ):
-                return Response({"detail": f"片段 {index} 包含不支援的內建物件。"}, status=status.HTTP_400_BAD_REQUEST)
-
         if not segment.get("videoUrl"):
             return Response({"detail": f"片段 {index} 尚未選擇素材。"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -572,24 +639,37 @@ def compose_video(request):
                     base_clip = base_material_clip.subclipped(0, clip_duration).with_audio(
                         audio_clip.subclipped(0, clip_duration)
                     )
-                    subtitle_text_clip = TextClip(
-                        font=str(SUBTITLE_FONT_PATH) if SUBTITLE_FONT_PATH.exists() else None,
-                        text=format_subtitle_text(text, video_settings["subtitle_max_chars"]),
-                        font_size=SUBTITLE_FONT_SIZE,
-                        size=(video_settings["subtitle_width"], None),
-                        color="white",
-                        stroke_color="black",
-                        stroke_width=3,
-                        method="caption",
-                        margin=(SUBTITLE_HORIZONTAL_MARGIN, SUBTITLE_VERTICAL_MARGIN),
-                        text_align="center",
-                        duration=clip_duration,
-                    )
-                    subtitle_clip = subtitle_text_clip.with_position(
-                        ("center", video_settings["subtitle_top"])
-                    )
+                    subtitle_text_clips = []
+                    subtitle_clips = []
+
+                    for cue in build_subtitle_cues(
+                        text,
+                        clip_duration,
+                        video_settings["subtitle_width"],
+                    ):
+                        subtitle_text_clip = TextClip(
+                            font=str(SUBTITLE_FONT_PATH) if SUBTITLE_FONT_PATH.exists() else None,
+                            text=cue["text"],
+                            font_size=SUBTITLE_FONT_SIZE,
+                            size=(video_settings["subtitle_width"], None),
+                            color="white",
+                            stroke_color="black",
+                            stroke_width=SUBTITLE_STROKE_WIDTH,
+                            method="caption",
+                            margin=(SUBTITLE_HORIZONTAL_MARGIN, SUBTITLE_VERTICAL_MARGIN),
+                            text_align="center",
+                            duration=cue["duration"],
+                        )
+                        subtitle_clip = (
+                            subtitle_text_clip
+                            .with_start(cue["start"])
+                            .with_position(("center", video_settings["subtitle_top"]))
+                        )
+                        subtitle_text_clips.append(subtitle_text_clip)
+                        subtitle_clips.append(subtitle_clip)
+
                     clip = (
-                        CompositeVideoClip([base_clip, subtitle_clip], size=target_size)
+                        CompositeVideoClip([base_clip, *subtitle_clips], size=target_size)
                         .with_audio(base_clip.audio)
                         .with_duration(clip_duration)
                     )
@@ -604,8 +684,8 @@ def compose_video(request):
                             audio_clip,
                             *video_resources,
                             base_clip,
-                            subtitle_text_clip,
-                            subtitle_clip,
+                            *subtitle_text_clips,
+                            *subtitle_clips,
                             clip,
                         ]
                     )
