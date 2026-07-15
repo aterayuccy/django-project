@@ -11,6 +11,7 @@
 }
 
 .settings-panel,
+.scene-step-panel,
 .work-panel {
   display: flex;
   flex-direction: column;
@@ -27,9 +28,37 @@
   box-sizing: border-box;
 }
 
+.scene-step-panel,
 .work-panel {
   width: min(1460px, 100%);
   box-sizing: border-box;
+}
+
+.workflow-step-label {
+  margin: 0 0 8px;
+  color: #4c1d95;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.scene-step-heading p:last-child {
+  margin: 0 0 14px;
+  color: #475569;
+}
+
+.workflow-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.selected-scene-status {
+  margin: 12px 0 0;
+  color: #15803d;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
 }
 
 .task-form label {
@@ -94,20 +123,6 @@
 .task-form .segment-count-row input {
   margin: 0 0 10px;
   border-radius: 6px;
-}
-
-.pixabay-link {
-  align-self: flex-start;
-  margin: -6px 0 10px;
-  color: #2563eb;
-  font-size: 15px;
-  font-weight: 400;
-  text-decoration: none;
-}
-
-.pixabay-link:hover {
-  color: #1d4ed8;
-  text-decoration: underline;
 }
 
 .task-form .next-step-button {
@@ -196,20 +211,6 @@
   align-items: start;
 }
 
-.builtin-material-editor {
-  display: grid;
-  gap: 10px;
-  margin-top: 2px;
-}
-
-.material-picker-title {
-  margin: 4px 0 0;
-  color: #263244;
-  font-size: 15px;
-  font-weight: 700;
-  text-align: left;
-}
-
 .material-choice-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
@@ -241,10 +242,17 @@
 .material-choice-canvas {
   display: block;
   width: 100%;
-  aspect-ratio: 16 / 10;
   margin-bottom: 4px;
   border-radius: 4px;
   background: #e2e8f0;
+}
+
+.material-choice-canvas--short {
+  aspect-ratio: 9 / 16;
+}
+
+.material-choice-canvas--long {
+  aspect-ratio: 16 / 9;
 }
 
 .material-choice small {
@@ -255,83 +263,46 @@
   font-weight: 400;
 }
 
-.builtin-material-preview {
-  width: min(100%, 760px);
-  margin: 4px auto 0;
+.builtin-material-canvas {
+  display: block;
+  width: 100%;
+}
+
+.talking-scene-summary {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 22px;
+  align-items: center;
+  padding: 16px;
+  border: 1px solid #ddd6fe;
+  border-radius: 10px;
+  background: #faf5ff;
+}
+
+.talking-scene-summary h2 {
+  margin: 0 0 6px;
+  color: #4c1d95;
+  font-size: 20px;
+}
+
+.talking-scene-summary p,
+.talking-scene-note {
+  margin: 0;
+  color: #5b21b6;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.talking-scene-preview {
+  width: min(520px, 42vw);
   overflow: hidden;
-  border: 1px solid #cbd5e1;
+  border: 1px solid #c4b5fd;
   border-radius: 8px;
   background: #0f172a;
 }
 
-.builtin-material-preview--short {
-  width: min(100%, 400px);
-}
-
-.builtin-material-preview p {
-  margin: 0;
-  padding: 8px 10px;
-  background: #f8fafc;
-  color: #475569;
-  font-size: 13px;
-  text-align: center;
-}
-
-.builtin-material-status {
-  margin: 0;
-  color: #5b21b6;
-  font-size: 14px;
-  font-weight: 700;
-  text-align: center;
-}
-
-.builtin-material-canvas {
-  display: block;
-  width: 100%;
-  cursor: crosshair;
-  touch-action: none;
-}
-
-.builtin-canvas-stage {
-  position: relative;
-}
-
-.builtin-object-outline {
-  position: absolute;
-  width: 26%;
-  aspect-ratio: 1;
-  border: 2px solid rgba(255, 255, 255, 0.8);
-  border-radius: 50%;
-  pointer-events: none;
-  transform: translate(-50%, -50%);
-}
-
-.builtin-object-outline.is-active {
-  border-color: #facc15;
-  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.45);
-}
-
-.task-form .builtin-object-delete {
-  position: absolute;
-  top: -12px;
-  right: -12px;
-  display: grid;
-  width: 25px;
-  min-height: 25px;
-  padding: 0;
-  border: 2px solid #ffffff;
-  border-radius: 50%;
-  background: #dc2626;
-  color: #ffffff;
-  font-size: 20px;
-  font-weight: 400;
-  line-height: 1;
-  place-items: center;
-  pointer-events: auto;
-}
-
-.task-form .builtin-object-delete:hover:not(:disabled) {
-  background: #b91c1c;
+.talking-scene-preview--short {
+  width: min(230px, 32vw);
 }
 
 .segment-error {
@@ -408,6 +379,14 @@
   gap: 12px;
 }
 
+.compose-status-message {
+  margin: 0;
+  color: #64748b;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+}
+
 .task-form .back-step-button,
 .task-form .compose-button {
   width: 130px;
@@ -465,5 +444,15 @@
 
   .material-choice-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .talking-scene-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .talking-scene-preview,
+  .talking-scene-preview--short {
+    width: min(100%, 360px);
+    justify-self: center;
   }
 }

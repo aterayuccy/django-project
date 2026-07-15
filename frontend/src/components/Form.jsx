@@ -6,7 +6,7 @@ import "../styles/Form.css";
 import LoadingIndicator from "./LoadingIndicator";
 
 function Form({ route, method }) {
-  const [username, setUserName] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -14,32 +14,33 @@ function Form({ route, method }) {
 
   const isLogin = method === "login";
   const title = isLogin ? "登入" : "註冊";
-  const buttonText = isLogin ? "登入帳號" : "建立帳號";
+  const buttonText = isLogin ? "登入並開始製作" : "建立帳號";
 
-  const getErrorMessage = (error) => {
-    if (error.response?.data?.detail) return error.response.data.detail;
-    if (error.response?.data?.username) return error.response.data.username[0];
-    if (error.response?.data?.password) return error.response.data.password[0];
-    return isLogin ? "登入失敗，請確認帳號或密碼。" : "註冊失敗，請稍後再試。";
+  const getErrorMessage = (requestError) => {
+    const data = requestError.response?.data;
+    if (data?.detail) return data.detail;
+    if (data?.username) return Array.isArray(data.username) ? data.username[0] : data.username;
+    if (data?.password) return Array.isArray(data.password) ? data.password[0] : data.password;
+    return isLogin ? "登入失敗，請確認帳號與密碼。" : "註冊失敗，請稍後再試。";
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (event) => {
+    event.preventDefault();
     setLoading(true);
     setError("");
 
     try {
-      const res = await api.post(route, { username, password });
+      const response = await api.post(route, { username: username.trim(), password });
 
       if (isLogin) {
-        localStorage.setItem(ACCESS_TOKEN, res.data.access);
-        localStorage.setItem(REFRESH_TOKEN, res.data.refresh);
+        localStorage.setItem(ACCESS_TOKEN, response.data.access);
+        localStorage.setItem(REFRESH_TOKEN, response.data.refresh);
         navigate("/new-task");
       } else {
         navigate("/");
       }
-    } catch (error) {
-      setError(getErrorMessage(error));
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
     } finally {
       setLoading(false);
     }
@@ -51,7 +52,11 @@ function Form({ route, method }) {
         <div className="auth-copy">
           <p className="auth-kicker">Video Maker</p>
           <h1 id="auth-title">{title}</h1>
-          <p>{isLogin ? "登入後開始製作影片旁白與素材片段。" : "建立帳號，開始整理你的影片製作流程。"}</p>
+          <p>
+            {isLogin
+              ? "登入後開始製作影片旁白與素材片段。"
+              : "建立帳號，開始整理你的影片製作流程。"}
+          </p>
         </div>
 
         <form onSubmit={handleSubmit} className="auth-form">
@@ -61,7 +66,7 @@ function Form({ route, method }) {
             className="form-input"
             type="text"
             value={username}
-            onChange={(e) => setUserName(e.target.value)}
+            onChange={(event) => setUsername(event.target.value)}
             placeholder="請輸入帳號"
             autoComplete="username"
             required
@@ -73,7 +78,7 @@ function Form({ route, method }) {
             className="form-input"
             type="password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(event) => setPassword(event.target.value)}
             placeholder="請輸入密碼"
             autoComplete={isLogin ? "current-password" : "new-password"}
             required
@@ -88,7 +93,7 @@ function Form({ route, method }) {
 
           <p className="auth-switch">
             {isLogin ? "還沒有帳號？" : "已經有帳號？"}
-            <Link to={isLogin ? "/register" : "/"}>{isLogin ? "前往註冊" : "前往登入"}</Link>
+            <Link to={isLogin ? "/register" : "/"}>{isLogin ? "前往註冊" : "回到登入"}</Link>
           </p>
         </form>
       </section>
