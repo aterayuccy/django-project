@@ -11,3 +11,4 @@ python-dotenv
 edge-tts
 moviepy
 Pillow
+mysqlclient>=2.2.7,<3
