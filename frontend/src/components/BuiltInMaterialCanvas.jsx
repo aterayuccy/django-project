@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import characterAnimation from '../assets/objects/character-animation.mp4';
-import characterPoster from '../assets/objects/character-poster.png';
 import beachScene from '../assets/scenes/beach.png';
 import bedroomScene from '../assets/scenes/bedroom.png';
 import cafeScene from '../assets/scenes/cafe.png';
 import classroomScene from '../assets/scenes/classroom.png';
 import forestScene from '../assets/scenes/forest.png';
 import gardenScene from '../assets/scenes/garden.png';
+import { builtInCharacters } from './builtInMaterialOptions';
 
 const sceneImageSources = {
   classroom: classroomScene,
@@ -42,19 +41,36 @@ const drawScene = (ctx, width, height, image) => {
   ctx.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, width, height);
 };
 
-const isConnectedBackgroundPixel = (data, pixelIndex) => {
+const getBackgroundTone = (data, width, height) => {
+  const corners = [0, width - 1, (height - 1) * width, width * height - 1];
+  const brightness = corners.reduce((sum, pixelIndex) => {
+    const offset = pixelIndex * 4;
+    return sum + (data[offset] + data[offset + 1] + data[offset + 2]) / 3;
+  }, 0) / corners.length;
+
+  return brightness >= 128 ? 'light' : 'dark';
+};
+
+const isConnectedBackgroundPixel = (data, pixelIndex, backgroundTone) => {
   const offset = pixelIndex * 4;
   const red = data[offset];
   const green = data[offset + 1];
   const blue = data[offset + 2];
   const brightest = Math.max(red, green, blue);
   const darkest = Math.min(red, green, blue);
-  return brightest <= 58 && brightest - darkest <= 24;
+  const colorSpread = brightest - darkest;
+
+  if (backgroundTone === 'light') {
+    return darkest >= 242 && colorSpread <= 18;
+  }
+
+  return brightest <= 58 && colorSpread <= 24;
 };
 
-const removeConnectedBlackBackground = (context, width, height) => {
+const removeConnectedBackground = (context, width, height) => {
   const imageData = context.getImageData(0, 0, width, height);
   const { data } = imageData;
+  const backgroundTone = getBackgroundTone(data, width, height);
   const pixelCount = width * height;
   const visited = new Uint8Array(pixelCount);
   const queue = new Int32Array(pixelCount);
@@ -62,7 +78,10 @@ const removeConnectedBlackBackground = (context, width, height) => {
   let queueEnd = 0;
 
   const enqueue = (pixelIndex) => {
-    if (visited[pixelIndex] || !isConnectedBackgroundPixel(data, pixelIndex)) return;
+    if (
+      visited[pixelIndex] ||
+      !isConnectedBackgroundPixel(data, pixelIndex, backgroundTone)
+    ) return;
     visited[pixelIndex] = 1;
     queue[queueEnd] = pixelIndex;
     queueEnd += 1;
@@ -105,7 +124,7 @@ const drawCharacter = (ctx, width, height, video, characterCanvas) => {
   const characterContext = characterCanvas.getContext('2d', { willReadFrequently: true });
   characterContext.clearRect(0, 0, side, side);
   characterContext.drawImage(video, 0, 0, side, side);
-  removeConnectedBlackBackground(characterContext, side, side);
+  removeConnectedBackground(characterContext, side, side);
 
   const x = (width - side) / 2;
   const y = height * 0.61 - side / 2;
@@ -113,17 +132,25 @@ const drawCharacter = (ctx, width, height, video, characterCanvas) => {
   return true;
 };
 
-const drawCharacterPoster = (ctx, width, height, image) => {
+const drawCharacterPoster = (ctx, width, height, image, characterCanvas) => {
   if (!image) return false;
 
   const side = Math.max(1, Math.round(Math.min(width * 0.8, height * 0.64)));
+  characterCanvas.width = side;
+  characterCanvas.height = side;
+  const characterContext = characterCanvas.getContext('2d', { willReadFrequently: true });
+  characterContext.clearRect(0, 0, side, side);
+  characterContext.drawImage(image, 0, 0, side, side);
+  removeConnectedBackground(characterContext, side, side);
+
   const x = (width - side) / 2;
   const y = height * 0.61 - side / 2;
-  ctx.drawImage(image, x, y, side, side);
+  ctx.drawImage(characterCanvas, x, y, side, side);
   return true;
 };
 
 export function BuiltInMaterialCanvas({
+  characterId = 'rabbit',
   sceneId = 'classroom',
   videoFormat = 'short',
   animate = true,
@@ -141,6 +168,8 @@ export function BuiltInMaterialCanvas({
   const [sceneImage, setSceneImage] = useState(null);
   const [characterPosterImage, setCharacterPosterImage] = useState(null);
   const [characterVideo, setCharacterVideo] = useState(null);
+  const selectedCharacter =
+    builtInCharacters.find((character) => character.id === characterId) || builtInCharacters[0];
 
   useEffect(() => {
     canvasReadyRef.current = onCanvasReady;
@@ -156,7 +185,7 @@ export function BuiltInMaterialCanvas({
 
   useEffect(() => {
     notifiedCompositeKeyRef.current = '';
-  }, [sceneId, videoFormat]);
+  }, [characterId, sceneId, videoFormat]);
 
   useEffect(() => {
     const source = sceneImageSources[sceneId];
@@ -176,12 +205,13 @@ export function BuiltInMaterialCanvas({
 
   useEffect(() => {
     const image = new Image();
-    image.src = characterPoster;
+    setCharacterPosterImage(null);
+    image.src = selectedCharacter.poster;
     image.onload = () => setCharacterPosterImage(image);
     return () => {
       image.onload = null;
     };
-  }, []);
+  }, [selectedCharacter.poster]);
 
   useEffect(() => {
     if (!animate) {
@@ -191,7 +221,7 @@ export function BuiltInMaterialCanvas({
 
     let cancelled = false;
     const video = document.createElement('video');
-    video.src = characterAnimation;
+    video.src = selectedCharacter.animation;
     video.preload = 'auto';
     video.muted = true;
     video.loop = true;
@@ -217,7 +247,7 @@ export function BuiltInMaterialCanvas({
       video.removeAttribute('src');
       video.load();
     };
-  }, [animate]);
+  }, [animate, selectedCharacter.animation]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -243,9 +273,9 @@ export function BuiltInMaterialCanvas({
       drawScene(context, width, height, sceneImage);
       const characterDrawn = animate
         ? drawCharacter(context, width, height, characterVideo, characterCanvas)
-        : drawCharacterPoster(context, width, height, characterPosterImage);
+        : drawCharacterPoster(context, width, height, characterPosterImage, characterCanvas);
 
-      const compositeKey = `${sceneId}|${videoFormat}`;
+      const compositeKey = `${characterId}|${sceneId}|${videoFormat}`;
       if (
         sceneImage &&
         characterDrawn &&
@@ -254,6 +284,7 @@ export function BuiltInMaterialCanvas({
         notifiedCompositeKeyRef.current = compositeKey;
         compositeReadyRef.current?.({
           canvas,
+          characterId,
           sceneId,
           videoFormat,
           duration: characterVideo?.duration || 0,
@@ -265,7 +296,7 @@ export function BuiltInMaterialCanvas({
 
     render();
     return () => cancelAnimationFrame(frameId);
-  }, [animate, characterPosterImage, characterVideo, sceneId, sceneImage, videoFormat]);
+  }, [animate, characterId, characterPosterImage, characterVideo, sceneId, sceneImage, videoFormat]);
 
   return <canvas ref={canvasRef} className={className} />;
 }

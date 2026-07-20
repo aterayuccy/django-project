@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
 import { BuiltInMaterialCanvas } from '../components/BuiltInMaterialCanvas';
-import { builtInScenes } from '../components/builtInMaterialOptions';
+import { builtInCharacters, builtInScenes } from '../components/builtInMaterialOptions';
 import '../styles/Home.css';
 
 const fallbackVoices = [
@@ -14,7 +14,7 @@ const fallbackVoices = [
   { id: 'en-US-GuyNeural', name: 'Guy（英文男聲）' },
 ];
 
-const createEmptySegment = (builtinScene = '') => ({
+const createEmptySegment = (builtinCharacter = '', builtinScene = '') => ({
   text: '',
   status: 'idle',
   audioUrl: '',
@@ -22,6 +22,7 @@ const createEmptySegment = (builtinScene = '') => ({
   size: 0,
   materialSource: 'builtin',
   keyword: '',
+  builtinCharacter,
   builtinScene,
   builtinCompositeKey: '',
   materialStatus: 'idle',
@@ -33,11 +34,12 @@ const createEmptySegment = (builtinScene = '') => ({
 });
 
 const getBuiltinCompositeKey = (segment, videoFormat) =>
-  `${segment.builtinScene}|${videoFormat}`;
+  `${segment.builtinCharacter}|${segment.builtinScene}|${videoFormat}`;
 
 const canSaveBuiltinMaterial = (segment, videoFormat) =>
   Boolean(
     segment.audioUrl &&
+    segment.builtinCharacter &&
     segment.builtinScene &&
     segment.builtinCompositeKey === getBuiltinCompositeKey(segment, videoFormat),
   );
@@ -80,6 +82,7 @@ function Home() {
   const [resultVideoUrl, setResultVideoUrl] = useState('');
   const [resultVideoBlob, setResultVideoBlob] = useState(null);
   const [workflowStep, setWorkflowStep] = useState(1);
+  const [selectedBuiltinCharacter, setSelectedBuiltinCharacter] = useState('');
   const [selectedBuiltinScene, setSelectedBuiltinScene] = useState('');
   const segmentsRef = useRef(segments);
   const resultVideoUrlRef = useRef(resultVideoUrl);
@@ -106,7 +109,7 @@ function Home() {
       const nextSegments = currentSegments.slice(0, segmentCount);
 
       while (nextSegments.length < segmentCount) {
-        nextSegments.push(createEmptySegment(selectedBuiltinScene));
+        nextSegments.push(createEmptySegment(selectedBuiltinCharacter, selectedBuiltinScene));
       }
 
       currentSegments.slice(segmentCount).forEach((segment) => {
@@ -115,7 +118,7 @@ function Home() {
 
       return nextSegments;
     });
-  }, [segmentCount, selectedBuiltinScene]);
+  }, [segmentCount, selectedBuiltinCharacter, selectedBuiltinScene]);
 
   useEffect(() => {
     segmentsRef.current = segments;
@@ -282,15 +285,17 @@ function Home() {
     const compositeReady = Boolean(
       materialSource === 'builtin' &&
       composite &&
+      composite.characterId === selectedBuiltinCharacter &&
       composite.sceneId === selectedBuiltinScene &&
       composite.videoFormat === videoFormat,
     );
     const nextSegment = {
       ...currentSegment,
       materialSource,
+      builtinCharacter: selectedBuiltinCharacter,
       builtinScene: selectedBuiltinScene,
       builtinCompositeKey: compositeReady
-        ? `${selectedBuiltinScene}|${videoFormat}`
+        ? `${selectedBuiltinCharacter}|${selectedBuiltinScene}|${videoFormat}`
         : '',
       materialStatus: 'idle',
       material: null,
@@ -315,6 +320,7 @@ function Home() {
 
   const handleTalkingCompositeReady = (composite) => {
     if (
+      composite.characterId !== selectedBuiltinCharacter ||
       composite.sceneId !== selectedBuiltinScene ||
       composite.videoFormat !== videoFormat
     ) {
@@ -329,8 +335,9 @@ function Home() {
         builtinCanvasRefs.current[index] = composite;
         return {
           ...segment,
+          builtinCharacter: selectedBuiltinCharacter,
           builtinScene: selectedBuiltinScene,
-          builtinCompositeKey: `${selectedBuiltinScene}|${videoFormat}`,
+          builtinCompositeKey: `${selectedBuiltinCharacter}|${selectedBuiltinScene}|${videoFormat}`,
           materialStatus: segment.audioUrl ? 'rendering' : 'idle',
           materialError: '',
         };
@@ -628,12 +635,42 @@ function Home() {
     );
   };
 
+  const selectBuiltinCharacter = (characterId) => {
+    if (characterId === selectedBuiltinCharacter) return;
+
+    resetResultVideo();
+    talkingCompositeRef.current = null;
+    setSelectedBuiltinCharacter(characterId);
+    setSegments((currentSegments) =>
+      currentSegments.map((segment, index) => {
+        builtinMaterialRequestRefs.current[index] =
+          (builtinMaterialRequestRefs.current[index] || 0) + 1;
+        builtinCanvasRefs.current[index] = null;
+
+        if (segment.materialSource !== 'builtin') {
+          return { ...segment, builtinCharacter: characterId, builtinCompositeKey: '' };
+        }
+
+        return {
+          ...segment,
+          builtinCharacter: characterId,
+          builtinCompositeKey: '',
+          materialStatus: 'idle',
+          material: null,
+          showMaterial: false,
+          materialError: '',
+        };
+      }),
+    );
+  };
+
   const showSegmentEditor = () => {
-    if (!selectedBuiltinScene) return;
+    if (!selectedBuiltinCharacter || !selectedBuiltinScene) return;
 
     setSegments((currentSegments) =>
       currentSegments.map((segment) => ({
         ...segment,
+        builtinCharacter: selectedBuiltinCharacter,
         builtinScene: selectedBuiltinScene,
         builtinCompositeKey: '',
       })),
@@ -674,6 +711,7 @@ function Home() {
         segment.materialStatus === 'ready' &&
         (segment.materialSource === 'builtin'
           ? Boolean(
+              segment.builtinCharacter &&
               segment.builtinScene &&
               segment.builtinCompositeKey === getBuiltinCompositeKey(segment, videoFormat) &&
               segment.material?.videoUrl,
@@ -689,6 +727,8 @@ function Home() {
 
   const selectedSceneName =
     builtInScenes.find((scene) => scene.id === selectedBuiltinScene)?.name || '';
+  const selectedCharacterName =
+    builtInCharacters.find((character) => character.id === selectedBuiltinCharacter)?.name || '';
 
   return (
     <main className="workspace-page">
@@ -751,30 +791,59 @@ function Home() {
 
         {workflowStep === 2 && <section className="scene-step-panel">
           <div className="scene-step-heading">
-            <p className="workflow-step-label">步驟 2 / 3 · 選擇說話畫面場景</p>
-            <p>這個場景會套用到第三步所有選擇「說話畫面」的片段。</p>
+            <p className="workflow-step-label">步驟 2 / 3 · 選擇角色與場景</p>
+            <p>選定的角色與場景會套用到第三步所有「說話畫面」片段。</p>
           </div>
-          <div className="material-choice-grid material-choice-grid--scenes">
-            {builtInScenes.map((scene) => (
-              <button
-                type="button"
-                key={scene.id}
-                className={`material-choice ${selectedBuiltinScene === scene.id ? 'is-selected' : ''}`}
-                onClick={() => selectBuiltinScene(scene.id)}
-              >
-                <BuiltInMaterialCanvas
-                  sceneId={scene.id}
-                  videoFormat={videoFormat}
-                  animate={false}
-                  className={`material-choice-canvas material-choice-canvas--${videoFormat}`}
-                />
-                <span>{scene.name}</span>
-              </button>
-            ))}
-          </div>
-          {selectedSceneName && (
-            <p className="selected-scene-status">已選擇：{selectedSceneName}</p>
-          )}
+          <section className="selection-block">
+            <div className="selection-block-heading">
+              <h2>選擇角色</h2>
+              <p>{selectedCharacterName ? `已選擇：${selectedCharacterName}` : '請選擇一個角色'}</p>
+            </div>
+            <div className="material-choice-grid material-choice-grid--characters">
+              {builtInCharacters.map((character) => (
+                <button
+                  type="button"
+                  key={character.id}
+                  className={`material-choice ${selectedBuiltinCharacter === character.id ? 'is-selected' : ''}`}
+                  onClick={() => selectBuiltinCharacter(character.id)}
+                >
+                  <BuiltInMaterialCanvas
+                    characterId={character.id}
+                    sceneId={selectedBuiltinScene || 'classroom'}
+                    videoFormat={videoFormat}
+                    animate={false}
+                    className={`material-choice-canvas material-choice-canvas--${videoFormat}`}
+                  />
+                  <span>{character.name}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+          <section className="selection-block">
+            <div className="selection-block-heading">
+              <h2>選擇場景</h2>
+              <p>{selectedSceneName ? `已選擇：${selectedSceneName}` : '請選擇一個場景'}</p>
+            </div>
+            <div className="material-choice-grid material-choice-grid--scenes">
+              {builtInScenes.map((scene) => (
+                <button
+                  type="button"
+                  key={scene.id}
+                  className={`material-choice ${selectedBuiltinScene === scene.id ? 'is-selected' : ''}`}
+                  onClick={() => selectBuiltinScene(scene.id)}
+                >
+                  <BuiltInMaterialCanvas
+                    characterId={selectedBuiltinCharacter || 'rabbit'}
+                    sceneId={scene.id}
+                    videoFormat={videoFormat}
+                    animate={false}
+                    className={`material-choice-canvas material-choice-canvas--${videoFormat}`}
+                  />
+                  <span>{scene.name}</span>
+                </button>
+              ))}
+            </div>
+          </section>
           <div className="workflow-actions">
             <button type="button" className="back-step-button" onClick={() => setWorkflowStep(1)}>
               上一步
@@ -783,7 +852,7 @@ function Home() {
               type="button"
               className="next-step-button"
               onClick={showSegmentEditor}
-              disabled={!selectedBuiltinScene}
+              disabled={!selectedBuiltinCharacter || !selectedBuiltinScene}
             >
               下一步
             </button>
@@ -796,10 +865,11 @@ function Home() {
             <section className="talking-scene-summary">
               <div>
                 <h2>說話畫面</h2>
-                <p>統一使用第二步選擇的「{selectedSceneName}」場景。</p>
+                <p>統一使用「{selectedCharacterName}」角色與「{selectedSceneName}」場景。</p>
               </div>
               <div className={`talking-scene-preview talking-scene-preview--${videoFormat}`}>
                 <BuiltInMaterialCanvas
+                  characterId={selectedBuiltinCharacter}
                   sceneId={selectedBuiltinScene}
                   videoFormat={videoFormat}
                   onAnimationError={handleTalkingAnimationError}
@@ -866,7 +936,7 @@ function Home() {
                   )}
                   {segment.materialSource === 'builtin' && (
                     <p className="talking-scene-note">
-                      使用第二步選擇的「{selectedSceneName}」說話畫面。
+                      使用第二步選擇的「{selectedCharacterName}」與「{selectedSceneName}」說話畫面。
                       {segment.materialStatus === 'rendering' && ' 正在準備素材...'}
                     </p>
                   )}

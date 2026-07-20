@@ -34,6 +34,10 @@
   box-sizing: border-box;
 }
 
+.scene-step-panel {
+  gap: 18px;
+}
+
 .workflow-step-label {
   margin: 0 0 8px;
   color: #4c1d95;
@@ -44,6 +48,38 @@
 .scene-step-heading p:last-child {
   margin: 0 0 14px;
   color: #475569;
+}
+
+.selection-block {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.selection-block-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.selection-block-heading h2,
+.selection-block-heading p {
+  margin: 0;
+}
+
+.selection-block-heading h2 {
+  color: #263244;
+  font-size: 19px;
+}
+
+.selection-block-heading p {
+  color: #15803d;
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .workflow-actions {
@@ -215,6 +251,10 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
   gap: 8px;
+}
+
+.material-choice-grid--characters {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .task-form .material-choice {
@@ -444,6 +484,12 @@
 
   .material-choice-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .selection-block-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
   }
 
   .talking-scene-summary {
