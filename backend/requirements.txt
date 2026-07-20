@@ -12,3 +12,5 @@ edge-tts
 moviepy
 Pillow
 mysqlclient>=2.2.7,<3
+gunicorn>=23,<24
+whitenoise>=6.9,<7

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import math
+import os
 import tempfile
 import uuid
 from functools import lru_cache
@@ -37,7 +38,14 @@ VIDEO_FORMATS = {
 BUILTIN_SCENE_IDS = {"classroom", "bedroom", "garden", "beach", "cafe", "forest", "rooftop", "studio"}
 BUILTIN_OBJECT_IDS = {"cat", "tree", "balloon", "fish", "rocket", "lamp", "cloud", "flower"}
 TARGET_VIDEO_SIZE = VIDEO_FORMATS["long"]["size"]
-SUBTITLE_FONT_PATH = Path(r"C:\Windows\Fonts\msjh.ttc")
+SUBTITLE_FONT_PATH = Path(
+    os.getenv(
+        "SUBTITLE_FONT_PATH",
+        r"C:\Windows\Fonts\msjh.ttc"
+        if os.name == "nt"
+        else "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    )
+)
 SUBTITLE_MAX_LINES = 2
 SUBTITLE_FONT_SIZE = 36
 SUBTITLE_HORIZONTAL_MARGIN = 24
