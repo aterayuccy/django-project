@@ -6,18 +6,28 @@ const api= axios.create({
 });
 
 let refreshPromise = null;
+const PUBLIC_AUTH_ENDPOINTS = [
+    "/api/token/",
+    "/api/token/refresh/",
+    "/api/user/register/",
+];
 
 const clearAuth = () => {
     localStorage.removeItem(ACCESS_TOKEN);
     localStorage.removeItem(REFRESH_TOKEN);
 };
 
+const isPublicAuthRequest = (url = "") =>
+    PUBLIC_AUTH_ENDPOINTS.some((endpoint) => url.startsWith(endpoint));
+
 api.interceptors.request.use(
     (config)=>{
         const token = localStorage.getItem(ACCESS_TOKEN);
-        if (token) {
+
+        if (token && !isPublicAuthRequest(config.url)) {
             config.headers.Authorization = `Bearer ${token}`;
         }
+
         return config;
     },
     (error)=>{
@@ -29,7 +39,7 @@ api.interceptors.response.use(
     (response) => response,
     async (error) => {
         const originalRequest = error.config;
-        const isTokenRequest = originalRequest?.url?.startsWith("/api/token");
+        const isTokenRequest = isPublicAuthRequest(originalRequest?.url);
 
         if (
             error.response?.status !== 401 ||

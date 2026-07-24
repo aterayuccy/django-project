@@ -14,17 +14,16 @@ from urllib.parse import unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from django.conf import settings
-from django.contrib.auth.models import User
 from django.core.files.storage import default_storage
 from django.http import HttpResponse
 from rest_framework import generics, status
 from rest_framework.decorators import api_view, parser_classes, permission_classes
 from rest_framework.parsers import MultiPartParser
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from .models import Note, SavedVideo
-from .serializers import NoteSerializer, SavedVideoSerializer, UserSerializer
+from .serializers import NoteSerializer, SavedVideoSerializer
 
 VIDEO_FORMATS = {
     "short": {
@@ -122,12 +121,6 @@ class SavedVideoDelete(generics.DestroyAPIView):
 
     def get_queryset(self):
         return SavedVideo.objects.filter(author=self.request.user)
-
-
-class CreatUserView(generics.CreateAPIView):
-    queryset = User.objects.all()
-    serializer_class = UserSerializer
-    permission_classes = [AllowAny]
 
 
 EDGE_TTS_VOICES = {

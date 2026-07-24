@@ -3,6 +3,7 @@
   display: grid;
   place-items: center;
   padding: 36px 18px;
+  box-sizing: border-box;
   background:
     radial-gradient(circle at 20% 15%, rgba(20, 184, 166, 0.18), transparent 30%),
     radial-gradient(circle at 80% 20%, rgba(59, 130, 246, 0.14), transparent 32%),
@@ -11,12 +12,14 @@
 }
 
 .auth-panel {
-  width: min(980px, 100%);
+  width: 100%;
+  max-width: 980px;
   display: grid;
   grid-template-columns: 1fr 440px;
   gap: 38px;
   align-items: center;
   padding: 42px;
+  box-sizing: border-box;
   border: 1px solid rgba(148, 163, 184, 0.34);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.9);
@@ -57,6 +60,7 @@
   gap: 12px;
   margin: 0;
   padding: 30px;
+  box-sizing: border-box;
   border: 1px solid rgba(203, 213, 225, 0.9);
   border-radius: 12px;
   background: #ffffff;
@@ -95,6 +99,25 @@
   background: #fef2f2;
   color: #b91c1c;
   font-size: 16px;
+  text-align: left;
+}
+
+.form-success {
+  margin: 0 0 4px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 16px;
+  line-height: 1.5;
+  text-align: left;
+}
+
+.form-hint {
+  margin: -12px 0 8px;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.45;
   text-align: left;
 }
 

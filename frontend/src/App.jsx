@@ -1,11 +1,38 @@
-import { BrowserRouter, Link, NavLink, Route, Routes, Navigate, Outlet } from 'react-router-dom';
-import Home from './pages/Home';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import NotFound from './pages/NotFound';
-import Works from './pages/Works';
-import ProtectedRoute from './components/ProtectedRoute';
-import './App.css';
+import { useEffect, useMemo, useState } from "react";
+import {
+  BrowserRouter,
+  Link,
+  NavLink,
+  Route,
+  Routes,
+  Navigate,
+  Outlet,
+} from "react-router-dom";
+import Home from "./pages/Home";
+import Login from "./pages/Login";
+import Register from "./pages/Register";
+import NotFound from "./pages/NotFound";
+import Works from "./pages/Works";
+import ProtectedRoute from "./components/ProtectedRoute";
+import api from "./api";
+import "./App.css";
+
+const avatarColors = [
+  "#0f766e",
+  "#2563eb",
+  "#7c3aed",
+  "#c2410c",
+  "#be185d",
+  "#047857",
+];
+
+const getAvatarColor = (name) => {
+  const hash = Array.from(name).reduce(
+    (total, character) => total + character.codePointAt(0),
+    0,
+  );
+  return avatarColors[hash % avatarColors.length];
+};
 
 function Logout() {
   localStorage.clear();
@@ -18,14 +45,45 @@ function RegisterAndLogout() {
 }
 
 function DashboardLayout() {
+  const [profile, setProfile] = useState({ display_name: "使用者" });
+
+  useEffect(() => {
+    api
+      .get("/api/user/me/")
+      .then((response) => setProfile(response.data))
+      .catch(() => {});
+  }, []);
+
+  const avatarLetter = useMemo(() => {
+    const characters = Array.from(profile.display_name.trim());
+    return (characters[0] || "?").toLocaleUpperCase();
+  }, [profile.display_name]);
+
   return (
     <ProtectedRoute>
       <div className="app-shell">
         <header className="top-nav">
-          <Link className="brand" to="/new-task">Video Maker</Link>
+          <Link className="brand" to="/new-task">
+            Video Maker
+          </Link>
           <nav aria-label="主要導覽">
-            <NavLink to="/works">我的作品</NavLink>
-            <NavLink to="/logout">登出</NavLink>
+            <NavLink className="logout-link" to="/logout">
+              登出
+            </NavLink>
+            <NavLink
+              className="profile-nav-link"
+              to="/works"
+              aria-label={`開啟 ${profile.display_name} 的作品`}
+            >
+              <span
+                className="profile-avatar"
+                style={{ backgroundColor: getAvatarColor(profile.display_name) }}
+                aria-hidden="true"
+              >
+                {avatarLetter}
+              </span>
+              <span className="profile-name">{profile.display_name}</span>
+            </NavLink>
           </nav>
         </header>
         <Outlet />

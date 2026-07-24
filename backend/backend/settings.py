@@ -59,7 +59,11 @@ REST_FRAMEWORK = {
     ),
     "DEFAULT_PERMISSION_CLASSES":[
         "rest_framework.permissions.IsAuthenticated"
-    ]
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "register": "5/hour",
+        "login": "10/minute",
+    },
 }
 
 SIMPLE_JWT = {
@@ -154,6 +158,9 @@ AUTH_PASSWORD_VALIDATORS = [
     },
     {
         'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        'OPTIONS': {
+            'min_length': 8,
+        },
     },
     {
         'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
