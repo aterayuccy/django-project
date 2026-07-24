@@ -4,6 +4,7 @@ import uuid
 from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth.validators import UnicodeUsernameValidator
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from rest_framework import serializers, status
@@ -13,37 +14,24 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import UserProfile
 
-
-GENERIC_LOGIN_ERROR = "登入帳號或密碼不正確。"
+GENERIC_LOGIN_ERROR = "使用者名稱或密碼不正確。"
 DUMMY_PASSWORD_HASH = make_password(uuid.uuid4().hex)
-LOGIN_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
+USERNAME_VALIDATOR = UnicodeUsernameValidator(
+    message="使用者名稱只能包含文字、數字及 @、.、+、-、_ 符號。"
+)
 
 
-def normalize_login_name(value):
+def normalize_username(value):
     return value.strip().casefold()
 
 
-def get_or_create_profile(user):
-    profile, _ = UserProfile.objects.get_or_create(
-        user=user,
-        defaults={
-            "display_name": (user.username or "使用者")[:50],
-        },
-    )
-    return profile
-
-
 class RegistrationSerializer(serializers.Serializer):
-    login_name = serializers.CharField(
-        min_length=4,
+    username = serializers.CharField(
+        min_length=2,
         max_length=30,
         trim_whitespace=True,
-    )
-    display_name = serializers.CharField(
-        max_length=50,
-        trim_whitespace=True,
+        validators=[USERNAME_VALIDATOR],
     )
     password = serializers.CharField(
         write_only=True,
@@ -58,31 +46,18 @@ class RegistrationSerializer(serializers.Serializer):
         max_length=64,
     )
 
-    def validate_login_name(self, value):
-        value = normalize_login_name(value)
-
-        if not LOGIN_NAME_PATTERN.fullmatch(value):
-            raise serializers.ValidationError(
-                "登入帳號只能使用英文字母、數字與底線。"
-            )
+    def validate_username(self, value):
+        value = normalize_username(value)
 
         if User.objects.filter(username__iexact=value).exists():
-            raise serializers.ValidationError("這個登入帳號已被使用。")
-
-        return value
-
-    def validate_display_name(self, value):
-        value = value.strip()
-
-        if not value:
-            raise serializers.ValidationError("請輸入使用者名稱。")
+            raise serializers.ValidationError("這個使用者名稱已被使用。")
 
         return value
 
     def validate(self, attrs):
         password = attrs["password"]
 
-        if attrs["password"] != attrs["password_confirm"]:
+        if password != attrs["password_confirm"]:
             raise serializers.ValidationError(
                 {"password_confirm": "兩次輸入的密碼不一致。"}
             )
@@ -92,7 +67,7 @@ class RegistrationSerializer(serializers.Serializer):
                 {"password": "密碼至少要包含一個英文字母與一個數字。"}
             )
 
-        candidate_user = User(username=attrs["login_name"])
+        candidate_user = User(username=attrs["username"])
 
         try:
             validate_password(password, user=candidate_user)
@@ -104,22 +79,18 @@ class RegistrationSerializer(serializers.Serializer):
         return attrs
 
     def create(self, validated_data):
-        login_name = validated_data["login_name"]
+        username = validated_data["username"]
 
         try:
             with transaction.atomic():
                 user = User.objects.create_user(
-                    username=login_name,
+                    username=username,
                     password=validated_data["password"],
                 )
-                UserProfile.objects.create(
-                    user=user,
-                    display_name=validated_data["display_name"],
-                )
         except IntegrityError as error:
-            if User.objects.filter(username__iexact=login_name).exists():
+            if User.objects.filter(username__iexact=username).exists():
                 raise serializers.ValidationError(
-                    {"login_name": "這個登入帳號已被使用。"}
+                    {"username": "這個使用者名稱已被使用。"}
                 ) from error
 
             raise
@@ -133,7 +104,14 @@ class RegisterView(APIView):
     throttle_scope = "register"
 
     def post(self, request):
-        serializer = RegistrationSerializer(data=request.data)
+        data = request.data.copy()
+
+        # Keep the previous frontend usable while a rolling deployment switches
+        # from `login_name` to the single `username` field.
+        if not data.get("username") and data.get("login_name"):
+            data["username"] = data["login_name"]
+
+        serializer = RegistrationSerializer(data=data)
         serializer.is_valid(raise_exception=True)
         serializer.save()
 
@@ -149,11 +127,11 @@ class AccountTokenView(APIView):
     throttle_scope = "login"
 
     def post(self, request):
-        login_name = normalize_login_name(
-            str(request.data.get("login_name") or request.data.get("username") or "")
+        username = normalize_username(
+            str(request.data.get("username") or request.data.get("login_name") or "")
         )
         password = str(request.data.get("password") or "")
-        user = User.objects.filter(username__iexact=login_name).first()
+        user = User.objects.filter(username__iexact=username).first()
 
         if not user:
             check_password(password, DUMMY_PASSWORD_HASH)
@@ -168,13 +146,12 @@ class AccountTokenView(APIView):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
-        profile = get_or_create_profile(user)
         refresh = RefreshToken.for_user(user)
         return Response(
             {
                 "refresh": str(refresh),
                 "access": str(refresh.access_token),
-                "display_name": profile.display_name,
+                "username": user.username,
             }
         )
 
@@ -183,5 +160,4 @@ class CurrentUserView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        profile = get_or_create_profile(request.user)
-        return Response({"display_name": profile.display_name})
+        return Response({"username": request.user.username})

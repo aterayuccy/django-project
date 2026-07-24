@@ -2,8 +2,6 @@ from django.contrib.auth.models import User
 from django.core.cache import cache
 from rest_framework.test import APITestCase
 
-from .models import UserProfile
-
 
 class AccountSecurityTests(APITestCase):
     password = "A7longerPassphrase"
@@ -13,27 +11,24 @@ class AccountSecurityTests(APITestCase):
 
     def registration_payload(
         self,
-        login_name="video_user01",
-        display_name="小明",
+        username="小明01",
         password=None,
     ):
         chosen_password = password or self.password
         return {
-            "login_name": login_name,
-            "display_name": display_name,
+            "username": username,
             "password": chosen_password,
             "password_confirm": chosen_password,
         }
 
     def register(
         self,
-        login_name="video_user01",
-        display_name="小明",
+        username="小明01",
         password=None,
     ):
         return self.client.post(
             "/api/user/register/",
-            self.registration_payload(login_name, display_name, password),
+            self.registration_payload(username, password),
             format="json",
         )
 
@@ -43,31 +38,30 @@ class AccountSecurityTests(APITestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(set(response.data), {"detail"})
 
-        user = User.objects.get(username="video_user01")
+        user = User.objects.get(username="小明01")
         self.assertTrue(user.is_active)
         self.assertEqual(user.email, "")
         self.assertNotEqual(user.password, self.password)
         self.assertTrue(user.check_password(self.password))
-        self.assertEqual(user.profile.display_name, "小明")
 
-    def test_display_names_can_repeat_but_login_names_cannot(self):
-        first = self.register("first_account", "同名使用者")
-        second = self.register("second_account", "同名使用者")
-        duplicate = self.register("FIRST_ACCOUNT", "另一個名稱")
+    def test_usernames_are_unique_and_case_insensitive(self):
+        first = self.register("VideoUser")
+        duplicate = self.register("VIDEOUSER")
 
         self.assertEqual(first.status_code, 201)
-        self.assertEqual(second.status_code, 201)
         self.assertEqual(duplicate.status_code, 400)
-        self.assertEqual(
-            UserProfile.objects.filter(display_name="同名使用者").count(),
-            2,
-        )
-        self.assertEqual(UserProfile.objects.count(), 2)
+        self.assertEqual(User.objects.count(), 1)
+
+    def test_unicode_usernames_are_supported(self):
+        response = self.register("兔子老師")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(User.objects.filter(username="兔子老師").exists())
 
     def test_password_requires_eight_characters_letter_and_number(self):
-        too_short = self.register("short_account", password="Abc1234")
-        no_number = self.register("letter_account", password="LettersOnly")
-        no_letter = self.register("number_account", password="123456789")
+        too_short = self.register("short_user", password="Abc1234")
+        no_number = self.register("letter_user", password="LettersOnly")
+        no_letter = self.register("number_user", password="123456789")
 
         self.assertEqual(too_short.status_code, 400)
         self.assertEqual(no_number.status_code, 400)
@@ -75,45 +69,50 @@ class AccountSecurityTests(APITestCase):
         self.assertEqual(User.objects.count(), 0)
 
     def test_login_is_case_insensitive_and_returns_tokens(self):
-        self.register("video_user01", "小明")
+        self.register("VideoUser")
 
         login = self.client.post(
             "/api/token/",
-            {"login_name": "VIDEO_USER01", "password": self.password},
+            {"username": "VIDEOUSER", "password": self.password},
             format="json",
         )
 
         self.assertEqual(login.status_code, 200)
-        self.assertEqual(login.data["display_name"], "小明")
+        self.assertEqual(login.data["username"], "videouser")
         self.assertIn("access", login.data)
         self.assertIn("refresh", login.data)
 
-    def test_current_user_exposes_only_display_name(self):
+    def test_current_user_exposes_only_username(self):
         self.register()
-        user = User.objects.get(username="video_user01")
+        user = User.objects.get(username="小明01")
         self.client.force_authenticate(user)
 
         response = self.client.get("/api/user/me/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, {"display_name": "小明"})
+        self.assertEqual(response.data, {"username": "小明01"})
         self.assertNotIn("id", response.data)
-        self.assertNotIn("username", response.data)
         self.assertNotIn("email", response.data)
 
-    def test_existing_account_gets_profile_on_first_login(self):
-        user = User.objects.create_user(
-            username="legacy-user",
-            password=self.password,
-            is_active=True,
-        )
-
+    def test_previous_login_name_payload_remains_compatible(self):
         response = self.client.post(
-            "/api/token/",
-            {"login_name": "legacy-user", "password": self.password},
+            "/api/user/register/",
+            {
+                "login_name": "legacy_payload",
+                "display_name": "舊版顯示名稱",
+                "password": self.password,
+                "password_confirm": self.password,
+            },
             format="json",
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["display_name"], "legacy-user")
-        self.assertTrue(UserProfile.objects.filter(user=user).exists())
+        self.assertEqual(response.status_code, 201)
+
+        login = self.client.post(
+            "/api/token/",
+            {"login_name": "legacy_payload", "password": self.password},
+            format="json",
+        )
+
+        self.assertEqual(login.status_code, 200)
+        self.assertEqual(login.data["username"], "legacy_payload")
