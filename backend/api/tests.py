@@ -1,9 +1,14 @@
+import wave
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import RequestFactory, SimpleTestCase, TestCase
+from PIL import Image
+from rest_framework.test import APIClient
 
 from .views import (
     BuiltinMaterialPreparationError,
@@ -179,3 +184,167 @@ class BuiltinMaterialNormalizationTests(SimpleTestCase):
                 normalize_builtin_material_video(source_path, output_path)
 
         which_mock.assert_called_once_with("ffmpeg")
+
+
+class BuiltinMaterialUploadTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = get_user_model().objects.create_user(
+            username="mobile-user",
+            password="StrongPass123",
+        )
+        self.client.force_authenticate(self.user)
+
+    def test_accepts_fallback_image_when_mobile_video_is_unavailable(self):
+        fallback_image = SimpleUploadedFile(
+            "fallback.jpg",
+            b"fallback image",
+            content_type="image/jpeg",
+        )
+
+        with TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            response = self.client.post(
+                "/api/builtin-materials/",
+                {"fallback_image": fallback_image},
+                format="multipart",
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data["videoUrl"], "")
+            self.assertTrue(response.data["fallbackImageUrl"].endswith(".jpg"))
+            saved_files = list(Path(media_root).rglob("*.jpg"))
+            self.assertEqual(len(saved_files), 1)
+
+    def test_preserves_mp4_extension_for_supported_mobile_recording(self):
+        video = SimpleUploadedFile(
+            "recording.mp4",
+            b"mobile mp4",
+            content_type="video/mp4",
+        )
+        fallback_image = SimpleUploadedFile(
+            "fallback.jpg",
+            b"fallback image",
+            content_type="image/jpeg",
+        )
+
+        with TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            response = self.client.post(
+                "/api/builtin-materials/",
+                {"video": video, "fallback_image": fallback_image},
+                format="multipart",
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.data["videoUrl"].endswith(".mp4"))
+            self.assertTrue(response.data["fallbackImageUrl"].endswith(".jpg"))
+
+    @patch("api.views.synthesize_tts_audio", new_callable=AsyncMock)
+    def test_composes_with_fallback_image_when_mobile_video_is_missing(
+        self,
+        synthesize_tts_audio_mock,
+    ):
+        audio_buffer = BytesIO()
+        with wave.open(audio_buffer, "wb") as audio_file:
+            audio_file.setnchannels(1)
+            audio_file.setsampwidth(2)
+            audio_file.setframerate(8000)
+            audio_file.writeframes(b"\x00\x00" * 4000)
+        synthesize_tts_audio_mock.return_value = audio_buffer.getvalue()
+
+        image_buffer = BytesIO()
+        Image.new("RGB", (72, 128), "#38bdf8").save(image_buffer, format="JPEG")
+        fallback_image = SimpleUploadedFile(
+            "fallback.jpg",
+            image_buffer.getvalue(),
+            content_type="image/jpeg",
+        )
+
+        with TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            upload_response = self.client.post(
+                "/api/builtin-materials/",
+                {"fallback_image": fallback_image},
+                format="multipart",
+            )
+            compose_response = self.client.post(
+                "/api/video/compose/",
+                {
+                    "voice": "zh-TW-HsiaoChenNeural",
+                    "video_format": "short",
+                    "segments": [
+                        {
+                            "text": "Hello",
+                            "materialType": "builtin",
+                            "videoUrl": "",
+                            "fallbackImageUrl": upload_response.data["fallbackImageUrl"],
+                            "loopMaterial": True,
+                            "builtinScene": "classroom",
+                        }
+                    ],
+                },
+                format="json",
+            )
+
+            self.assertEqual(compose_response.status_code, 200)
+            self.assertEqual(compose_response["Content-Type"], "video/mp4")
+            self.assertIn(b"ftyp", compose_response.content[:32])
+
+    @patch(
+        "api.views.normalize_builtin_material_video",
+        side_effect=BuiltinMaterialPreparationError("unreadable mobile recording"),
+    )
+    @patch("api.views.synthesize_tts_audio", new_callable=AsyncMock)
+    def test_composes_with_fallback_after_mobile_video_decode_failure(
+        self,
+        synthesize_tts_audio_mock,
+        normalize_video_mock,
+    ):
+        audio_buffer = BytesIO()
+        with wave.open(audio_buffer, "wb") as audio_file:
+            audio_file.setnchannels(1)
+            audio_file.setsampwidth(2)
+            audio_file.setframerate(8000)
+            audio_file.writeframes(b"\x00\x00" * 4000)
+        synthesize_tts_audio_mock.return_value = audio_buffer.getvalue()
+
+        image_buffer = BytesIO()
+        Image.new("RGB", (72, 128), "#f97316").save(image_buffer, format="JPEG")
+
+        with TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            upload_response = self.client.post(
+                "/api/builtin-materials/",
+                {
+                    "video": SimpleUploadedFile(
+                        "broken.webm",
+                        b"broken mobile recording",
+                        content_type="video/webm",
+                    ),
+                    "fallback_image": SimpleUploadedFile(
+                        "fallback.jpg",
+                        image_buffer.getvalue(),
+                        content_type="image/jpeg",
+                    ),
+                },
+                format="multipart",
+            )
+            compose_response = self.client.post(
+                "/api/video/compose/",
+                {
+                    "voice": "zh-TW-HsiaoChenNeural",
+                    "video_format": "short",
+                    "segments": [
+                        {
+                            "text": "Hello",
+                            "materialType": "builtin",
+                            "videoUrl": upload_response.data["videoUrl"],
+                            "fallbackImageUrl": upload_response.data["fallbackImageUrl"],
+                            "loopMaterial": True,
+                            "builtinScene": "classroom",
+                        }
+                    ],
+                },
+                format="json",
+            )
+
+            self.assertEqual(compose_response.status_code, 200)
+            self.assertIn(b"ftyp", compose_response.content[:32])
+            normalize_video_mock.assert_called_once()

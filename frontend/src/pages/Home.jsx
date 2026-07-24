@@ -203,27 +203,68 @@ function Home() {
       }
 
       const stream = canvas.captureStream(30);
-      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-        ? 'video/webm;codecs=vp9'
-        : 'video/webm';
+      const mimeType = [
+        'video/mp4;codecs=avc1.42E01E',
+        'video/mp4',
+        'video/webm;codecs=vp9',
+        'video/webm;codecs=vp8',
+        'video/webm',
+      ].find((type) => MediaRecorder.isTypeSupported(type));
       const chunks = [];
-      const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2500000 });
+      const recorderOptions = { videoBitsPerSecond: 2500000 };
+      if (mimeType) recorderOptions.mimeType = mimeType;
+      const recorder = new MediaRecorder(stream, recorderOptions);
+      let settled = false;
+
+      const fail = (error) => {
+        if (settled) return;
+        settled = true;
+        stream.getTracks().forEach((track) => track.stop());
+        reject(error);
+      };
 
       recorder.addEventListener('dataavailable', (event) => {
         if (event.data.size > 0) chunks.push(event.data);
       });
-      recorder.addEventListener('error', () => reject(new Error('Canvas 素材錄製失敗。')), { once: true });
+      recorder.addEventListener('error', () => fail(new Error('Canvas 素材錄製失敗。')), { once: true });
       recorder.addEventListener(
         'stop',
         () => {
+          if (settled) return;
+          settled = true;
           stream.getTracks().forEach((track) => track.stop());
-          resolve(new Blob(chunks, { type: mimeType }));
+          if (chunks.length === 0) {
+            reject(new Error('Canvas 素材沒有產生可用畫面。'));
+            return;
+          }
+          resolve(new Blob(chunks, { type: recorder.mimeType || mimeType || 'video/webm' }));
         },
         { once: true },
       );
 
-      recorder.start();
-      window.setTimeout(() => recorder.stop(), Math.min(12000, Math.max(1200, duration * 1000)));
+      recorder.start(250);
+      window.setTimeout(() => {
+        if (recorder.state === 'recording') {
+          try {
+            recorder.requestData();
+          } catch {
+            // Some mobile implementations do not support requestData reliably.
+          }
+          recorder.stop();
+        }
+      }, Math.min(12000, Math.max(1200, duration * 1000)));
+    });
+
+  const captureCanvasFallback = (canvas) =>
+    new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error('無法建立說話畫面的備援影像。'));
+        },
+        'image/jpeg',
+        0.9,
+      );
     });
 
   const saveBuiltinMaterial = async (index, segment, requestId) => {
@@ -238,18 +279,36 @@ function Home() {
     updateSegmentState(index, { materialStatus: 'rendering', material: null, materialError: '' });
 
     try {
-      const clip = await recordCanvasClip(canvas, composite.duration);
+      const fallbackImage = await captureCanvasFallback(canvas);
+      let clip = null;
+
+      try {
+        clip = await recordCanvasClip(canvas, composite.duration);
+      } catch {
+        // A still fallback keeps composition working when a mobile browser
+        // emits an empty or timestamp-less MediaRecorder file.
+      }
+
       if (builtinMaterialRequestRefs.current[index] !== requestId) return;
 
       const formData = new FormData();
-      formData.append('video', clip, `builtin-material-${Date.now()}.webm`);
+      if (clip) {
+        const extension = clip.type.includes('mp4') ? 'mp4' : 'webm';
+        formData.append('video', clip, `builtin-material-${Date.now()}.${extension}`);
+      }
+      formData.append('fallback_image', fallbackImage, `builtin-material-${Date.now()}.jpg`);
       const res = await api.post('/api/builtin-materials/', formData);
 
       if (builtinMaterialRequestRefs.current[index] !== requestId) return;
 
       updateSegmentState(index, {
         materialStatus: 'ready',
-        material: { type: 'builtin', videoUrl: res.data.videoUrl, loop: true },
+        material: {
+          type: 'builtin',
+          videoUrl: res.data.videoUrl || '',
+          fallbackImageUrl: res.data.fallbackImageUrl || '',
+          loop: true,
+        },
         materialError: '',
       });
     } catch (error) {
@@ -510,7 +569,8 @@ function Home() {
         !segment.text.trim() ||
         !segment.audioUrl ||
         (segment.materialSource === 'builtin'
-          ? !segment.builtinScene || !segment.material?.videoUrl
+          ? !segment.builtinScene ||
+            (!segment.material?.videoUrl && !segment.material?.fallbackImageUrl)
           : !segment.material?.videoUrl),
     );
 
@@ -531,6 +591,7 @@ function Home() {
             duration: segment.duration,
             materialType: segment.materialSource,
             videoUrl: segment.material?.videoUrl || '',
+            fallbackImageUrl: segment.material?.fallbackImageUrl || '',
             loopMaterial: segment.materialSource === 'builtin',
             builtinScene: segment.builtinScene,
           })),
