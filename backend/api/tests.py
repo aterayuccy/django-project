@@ -239,7 +239,7 @@ class BuiltinMaterialUploadTests(TestCase):
             self.assertTrue(response.data["fallbackImageUrl"].endswith(".jpg"))
 
     @patch("api.views.synthesize_tts_audio", new_callable=AsyncMock)
-    def test_composes_with_fallback_image_when_mobile_video_is_missing(
+    def test_composes_multiple_segments_with_fallback_images(
         self,
         synthesize_tts_audio_mock,
     ):
@@ -272,13 +272,14 @@ class BuiltinMaterialUploadTests(TestCase):
                     "video_format": "short",
                     "segments": [
                         {
-                            "text": "Hello",
+                            "text": f"Hello {index}",
                             "materialType": "builtin",
                             "videoUrl": "",
                             "fallbackImageUrl": upload_response.data["fallbackImageUrl"],
                             "loopMaterial": True,
                             "builtinScene": "classroom",
                         }
+                        for index in range(1, 4)
                     ],
                 },
                 format="json",
