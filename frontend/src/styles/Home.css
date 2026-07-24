@@ -151,14 +151,39 @@
 
 .segment-count-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0;
-  align-items: start;
+  grid-template-columns: 52px minmax(80px, 1fr) 52px;
+  gap: 8px;
+  align-items: stretch;
+  margin-bottom: 10px;
 }
 
 .task-form .segment-count-row input {
-  margin: 0 0 10px;
+  min-height: 48px;
+  margin: 0;
   border-radius: 6px;
+  font-size: 18px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.task-form .segment-count-row input::-webkit-inner-spin-button,
+.task-form .segment-count-row input::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.task-form .segment-count-button {
+  width: 100%;
+  min-height: 48px;
+  padding: 0;
+  background: #0f766e;
+  font-size: 25px;
+  line-height: 1;
+  touch-action: manipulation;
+}
+
+.task-form .segment-count-button:hover:not(:disabled) {
+  background: #115e59;
 }
 
 .task-form .next-step-button {
@@ -454,13 +479,18 @@
 
 @media (max-width: 640px) {
   .segment-count-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: 56px minmax(72px, 1fr) 56px;
     gap: 8px;
   }
 
   .task-form .segment-count-row input {
     border: 1px solid #cbd5e1;
     border-radius: 6px;
+  }
+
+  .task-form .segment-count-button {
+    min-height: 52px;
+    font-size: 28px;
   }
 
   .segment-controls {

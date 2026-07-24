@@ -816,16 +816,36 @@ function Home() {
 
           <label htmlFor="segmentCount">選擇片段數量</label>
           <div className="segment-count-row">
+            <button
+              type="button"
+              className="segment-count-button"
+              aria-label="減少片段數量"
+              onClick={() => handleExtraSegmentCount(extraSegmentCount - 1)}
+              disabled={extraSegmentCount <= 1}
+            >
+              −
+            </button>
             <input
               type="number"
               id="segmentCount"
               name="segmentCount"
               value={extraSegmentCount}
               onChange={(e) => handleExtraSegmentCount(e.target.value)}
+              inputMode="numeric"
               min="1"
               max="20"
               step="1"
+              aria-label="片段數量，最少 1 段，最多 20 段"
             />
+            <button
+              type="button"
+              className="segment-count-button"
+              aria-label="增加片段數量"
+              onClick={() => handleExtraSegmentCount(extraSegmentCount + 1)}
+              disabled={extraSegmentCount >= 20}
+            >
+              ＋
+            </button>
           </div>
 
           <label htmlFor="videoFormat">選擇影片尺寸</label>
