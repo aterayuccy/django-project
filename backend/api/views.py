@@ -2,6 +2,7 @@ import asyncio
 import json
 import math
 import os
+import shutil
 import socket
 import tempfile
 import time
@@ -9,7 +10,7 @@ import uuid
 from functools import lru_cache
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from django.conf import settings
@@ -164,7 +165,37 @@ async def synthesize_tts_audio(text, voice):
     return b"".join(audio_chunks)
 
 
-def download_file(url, target_path):
+def copy_local_media_file(url, target_path, request):
+    parsed_url = urlparse(url)
+    media_path = urlparse(settings.MEDIA_URL).path
+    request_host = request.get_host()
+
+    if parsed_url.netloc and parsed_url.netloc != request_host:
+        return False
+
+    if not parsed_url.path.startswith(media_path):
+        return False
+
+    storage_name = unquote(parsed_url.path[len(media_path):]).lstrip("/")
+
+    if not storage_name:
+        raise RuntimeError("Local media URL does not identify a file.")
+
+    with default_storage.open(storage_name, "rb") as source:
+        with target_path.open("wb") as target:
+            shutil.copyfileobj(source, target, VIDEO_DOWNLOAD_CHUNK_SIZE)
+
+    if target_path.stat().st_size == 0:
+        target_path.unlink(missing_ok=True)
+        raise RuntimeError("Local media file is empty.")
+
+    return True
+
+
+def download_file(url, target_path, request=None):
+    if request and copy_local_media_file(url, target_path, request):
+        return
+
     request = Request(url, headers={"User-Agent": "videomaker/1.0"})
     last_error = None
 
@@ -652,7 +683,7 @@ def compose_video(request):
                     target_size = video_settings["size"]
                     material_type = segment.get("materialType", "external")
                     video_path = temp_path / f"video_{index}.webm"
-                    download_file(segment["videoUrl"], video_path)
+                    download_file(segment["videoUrl"], video_path, request=request)
                     video_clip = VideoFileClip(str(video_path))
                     fitted_video_clip, fitted_resources = fit_video_clip_to_canvas(video_clip, target_size)
 

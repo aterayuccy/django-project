@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from django.test import SimpleTestCase, TestCase
+from django.test import RequestFactory, SimpleTestCase, TestCase
 
 from .views import build_subtitle_cues, download_file, split_subtitle_pages
 
@@ -83,6 +83,34 @@ class SubtitleFormattingTests(TestCase):
 
 
 class DownloadFileTests(SimpleTestCase):
+    @patch("api.views.urlopen")
+    @patch(
+        "api.views.default_storage.open",
+        return_value=BytesIO(b"uploaded built-in material"),
+    )
+    def test_same_origin_media_is_read_from_storage(
+        self,
+        storage_open_mock,
+        urlopen_mock,
+    ):
+        request = RequestFactory().get("/", HTTP_HOST="testserver")
+
+        with TemporaryDirectory() as temp_dir:
+            target_path = Path(temp_dir) / "video.webm"
+
+            download_file(
+                "https://testserver/media/builtin_materials/1/video.webm",
+                target_path,
+                request=request,
+            )
+
+            self.assertEqual(target_path.read_bytes(), b"uploaded built-in material")
+            storage_open_mock.assert_called_once_with(
+                "builtin_materials/1/video.webm",
+                "rb",
+            )
+            urlopen_mock.assert_not_called()
+
     @patch("api.views.time.sleep")
     @patch(
         "api.views.urlopen",
