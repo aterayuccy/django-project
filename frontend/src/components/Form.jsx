@@ -19,8 +19,7 @@ const getFirstError = (data) => {
 };
 
 function Form({ route, method }) {
-  const [displayName, setDisplayName] = useState("");
-  const [loginName, setLoginName] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [loading, setLoading] = useState(false);
@@ -37,10 +36,9 @@ function Form({ route, method }) {
 
     try {
       const payload = isLogin
-        ? { login_name: loginName.trim(), password }
+        ? { username: username.trim(), password }
         : {
-            display_name: displayName.trim(),
-            login_name: loginName.trim(),
+            username: username.trim(),
             password,
             password_confirm: passwordConfirm,
           };
@@ -52,8 +50,7 @@ function Form({ route, method }) {
         navigate("/new-task");
       } else {
         setSuccess(response.data.detail);
-        setDisplayName("");
-        setLoginName("");
+        setUsername("");
         setPassword("");
         setPasswordConfirm("");
       }
@@ -61,7 +58,7 @@ function Form({ route, method }) {
       setError(
         getFirstError(requestError.response?.data) ||
           (isLogin
-            ? "登入失敗，請確認登入帳號與密碼。"
+            ? "登入失敗，請確認使用者名稱與密碼。"
             : "註冊失敗，請稍後再試。"),
       );
     } finally {
@@ -77,47 +74,28 @@ function Form({ route, method }) {
           <h1 id="auth-title">{isLogin ? "登入" : "建立帳號"}</h1>
           <p>
             {isLogin
-              ? "使用登入帳號與密碼，繼續製作和管理你的影片。"
-              : "使用者名稱可以重複；登入帳號則是你登入時使用的唯一名稱。"}
+              ? "使用使用者名稱與密碼，繼續製作和管理你的影片。"
+              : "使用者名稱將用來登入，也會顯示在頭像下方，不能與其他人重複。"}
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="auth-form">
-          {!isLogin && (
-            <>
-              <label htmlFor="display-name">使用者名稱</label>
-              <input
-                id="display-name"
-                className="form-input"
-                type="text"
-                value={displayName}
-                onChange={(event) => setDisplayName(event.target.value)}
-                placeholder="顯示在頭像下方的名稱"
-                autoComplete="nickname"
-                maxLength={50}
-                required
-              />
-              <p className="form-hint">可以和其他使用者重複。</p>
-            </>
-          )}
-
-          <label htmlFor="login-name">登入帳號</label>
+          <label htmlFor="username">使用者名稱</label>
           <input
-            id="login-name"
+            id="username"
             className="form-input"
             type="text"
-            value={loginName}
-            onChange={(event) => setLoginName(event.target.value)}
-            placeholder="例如 video_user01"
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            placeholder="例如 小明 或 video_user01"
             autoComplete="username"
-            minLength={4}
+            minLength={2}
             maxLength={30}
-            pattern="[A-Za-z0-9_]+"
             required
           />
           {!isLogin && (
             <p className="form-hint">
-              需為 4–30 位英文字母、數字或底線，且不可與別人重複。
+              需為 2–30 位，可使用中文、英文、數字及 @、.、+、-、_，且不可與別人重複。
             </p>
           )}
 

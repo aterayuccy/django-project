@@ -45,7 +45,7 @@ function RegisterAndLogout() {
 }
 
 function DashboardLayout() {
-  const [profile, setProfile] = useState({ display_name: "使用者" });
+  const [profile, setProfile] = useState({ username: "使用者" });
 
   useEffect(() => {
     api
@@ -55,9 +55,9 @@ function DashboardLayout() {
   }, []);
 
   const avatarLetter = useMemo(() => {
-    const characters = Array.from(profile.display_name.trim());
+    const characters = Array.from(profile.username.trim());
     return (characters[0] || "?").toLocaleUpperCase();
-  }, [profile.display_name]);
+  }, [profile.username]);
 
   return (
     <ProtectedRoute>
@@ -73,16 +73,16 @@ function DashboardLayout() {
             <NavLink
               className="profile-nav-link"
               to="/works"
-              aria-label={`開啟 ${profile.display_name} 的作品`}
+              aria-label={`開啟 ${profile.username} 的作品`}
             >
               <span
                 className="profile-avatar"
-                style={{ backgroundColor: getAvatarColor(profile.display_name) }}
+                style={{ backgroundColor: getAvatarColor(profile.username) }}
                 aria-hidden="true"
               >
                 {avatarLetter}
               </span>
-              <span className="profile-name">{profile.display_name}</span>
+              <span className="profile-name">{profile.username}</span>
             </NavLink>
           </nav>
         </header>
