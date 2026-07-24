@@ -1,6 +1,11 @@
-from django.test import TestCase
+from io import BytesIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
-from .views import build_subtitle_cues, split_subtitle_pages
+from django.test import SimpleTestCase, TestCase
+
+from .views import build_subtitle_cues, download_file, split_subtitle_pages
 
 
 class SubtitleFormattingTests(TestCase):
@@ -75,3 +80,20 @@ class SubtitleFormattingTests(TestCase):
                 for current, following in zip(cues, cues[1:])
             )
         )
+
+
+class DownloadFileTests(SimpleTestCase):
+    @patch("api.views.time.sleep")
+    @patch(
+        "api.views.urlopen",
+        side_effect=[TimeoutError("slow response"), BytesIO(b"complete video")],
+    )
+    def test_download_retries_after_timeout(self, urlopen_mock, sleep_mock):
+        with TemporaryDirectory() as temp_dir:
+            target_path = Path(temp_dir) / "video.mp4"
+
+            download_file("https://example.com/video.mp4", target_path)
+
+            self.assertEqual(target_path.read_bytes(), b"complete video")
+            self.assertEqual(urlopen_mock.call_count, 2)
+            sleep_mock.assert_called_once_with(1)

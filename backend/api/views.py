@@ -2,7 +2,9 @@ import asyncio
 import json
 import math
 import os
+import socket
 import tempfile
+import time
 import uuid
 from functools import lru_cache
 from pathlib import Path
@@ -51,6 +53,9 @@ SUBTITLE_FONT_SIZE = 36
 SUBTITLE_HORIZONTAL_MARGIN = 24
 SUBTITLE_VERTICAL_MARGIN = 18
 SUBTITLE_STROKE_WIDTH = 3
+VIDEO_DOWNLOAD_TIMEOUT = int(os.getenv("VIDEO_DOWNLOAD_TIMEOUT", "180"))
+VIDEO_DOWNLOAD_RETRIES = int(os.getenv("VIDEO_DOWNLOAD_RETRIES", "3"))
+VIDEO_DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 
 
 class NoteListCreate(generics.ListCreateAPIView):
@@ -161,9 +166,32 @@ async def synthesize_tts_audio(text, voice):
 
 def download_file(url, target_path):
     request = Request(url, headers={"User-Agent": "videomaker/1.0"})
+    last_error = None
 
-    with urlopen(request, timeout=30) as response:
-        target_path.write_bytes(response.read())
+    for attempt in range(VIDEO_DOWNLOAD_RETRIES):
+        try:
+            with urlopen(request, timeout=VIDEO_DOWNLOAD_TIMEOUT) as response:
+                with target_path.open("wb") as target:
+                    while chunk := response.read(VIDEO_DOWNLOAD_CHUNK_SIZE):
+                        target.write(chunk)
+
+            if target_path.stat().st_size == 0:
+                raise RuntimeError("Downloaded video is empty.")
+
+            return
+        except HTTPError:
+            target_path.unlink(missing_ok=True)
+            raise
+        except (URLError, TimeoutError, socket.timeout, OSError) as error:
+            target_path.unlink(missing_ok=True)
+            last_error = error
+
+            if attempt + 1 < VIDEO_DOWNLOAD_RETRIES:
+                time.sleep(attempt + 1)
+
+    raise RuntimeError(
+        f"Video download failed after {VIDEO_DOWNLOAD_RETRIES} attempts: {last_error}"
+    ) from last_error
 
 
 def fit_video_clip_to_canvas(video_clip, target_size=TARGET_VIDEO_SIZE):
