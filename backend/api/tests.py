@@ -5,7 +5,13 @@ from unittest.mock import patch
 
 from django.test import RequestFactory, SimpleTestCase, TestCase
 
-from .views import build_subtitle_cues, download_file, split_subtitle_pages
+from .views import (
+    BuiltinMaterialPreparationError,
+    build_subtitle_cues,
+    download_file,
+    normalize_builtin_material_video,
+    split_subtitle_pages,
+)
 
 
 class SubtitleFormattingTests(TestCase):
@@ -125,3 +131,51 @@ class DownloadFileTests(SimpleTestCase):
             self.assertEqual(target_path.read_bytes(), b"complete video")
             self.assertEqual(urlopen_mock.call_count, 2)
             sleep_mock.assert_called_once_with(1)
+
+
+class BuiltinMaterialNormalizationTests(SimpleTestCase):
+    @patch("api.views.subprocess.run")
+    @patch("api.views.shutil.which", return_value="/usr/bin/ffmpeg")
+    def test_generates_timestamps_and_transcodes_mobile_webm(
+        self,
+        which_mock,
+        run_mock,
+    ):
+        with TemporaryDirectory() as temp_dir:
+            source_path = Path(temp_dir) / "mobile.webm"
+            output_path = Path(temp_dir) / "normalized.mp4"
+            source_path.write_bytes(b"webm")
+
+            def create_output(command, **kwargs):
+                output_path.write_bytes(b"mp4")
+                return type("Result", (), {"returncode": 0})()
+
+            run_mock.side_effect = create_output
+
+            result = normalize_builtin_material_video(source_path, output_path)
+
+            self.assertEqual(result, output_path)
+            command = run_mock.call_args.args[0]
+            self.assertIn("+genpts", command)
+            self.assertIn("libx264", command)
+            self.assertIn("yuv420p", command)
+            self.assertEqual(command[-1], str(output_path))
+            which_mock.assert_called_once_with("ffmpeg")
+
+    @patch("api.views.subprocess.run")
+    @patch("api.views.shutil.which", return_value="/usr/bin/ffmpeg")
+    def test_rejects_failed_mobile_webm_conversion(
+        self,
+        which_mock,
+        run_mock,
+    ):
+        run_mock.return_value = type("Result", (), {"returncode": 1})()
+
+        with TemporaryDirectory() as temp_dir:
+            source_path = Path(temp_dir) / "mobile.webm"
+            output_path = Path(temp_dir) / "normalized.mp4"
+
+            with self.assertRaises(BuiltinMaterialPreparationError):
+                normalize_builtin_material_video(source_path, output_path)
+
+        which_mock.assert_called_once_with("ffmpeg")

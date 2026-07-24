@@ -4,6 +4,7 @@ import math
 import os
 import shutil
 import socket
+import subprocess
 import tempfile
 import time
 import uuid
@@ -56,6 +57,87 @@ SUBTITLE_STROKE_WIDTH = 3
 VIDEO_DOWNLOAD_TIMEOUT = int(os.getenv("VIDEO_DOWNLOAD_TIMEOUT", "180"))
 VIDEO_DOWNLOAD_RETRIES = int(os.getenv("VIDEO_DOWNLOAD_RETRIES", "3"))
 VIDEO_DOWNLOAD_CHUNK_SIZE = 1024 * 1024
+
+
+class BuiltinMaterialPreparationError(RuntimeError):
+    pass
+
+
+def find_ffmpeg_executable():
+    ffmpeg_executable = shutil.which("ffmpeg")
+
+    if ffmpeg_executable:
+        return ffmpeg_executable
+
+    try:
+        from imageio_ffmpeg import get_ffmpeg_exe
+    except ImportError:
+        return None
+
+    bundled_executable = get_ffmpeg_exe()
+    return bundled_executable if Path(bundled_executable).exists() else None
+
+
+def normalize_builtin_material_video(source_path, output_path):
+    ffmpeg_executable = find_ffmpeg_executable()
+
+    if not ffmpeg_executable:
+        raise BuiltinMaterialPreparationError(
+            "伺服器暫時無法處理手機產生的說話畫面，請稍後再試。"
+        )
+
+    command = [
+        ffmpeg_executable,
+        "-y",
+        "-loglevel",
+        "error",
+        "-fflags",
+        "+genpts",
+        "-err_detect",
+        "ignore_err",
+        "-i",
+        str(source_path),
+        "-map",
+        "0:v:0",
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-pix_fmt",
+        "yuv420p",
+        "-r",
+        "30",
+        "-movflags",
+        "+faststart",
+        str(output_path),
+    ]
+
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise BuiltinMaterialPreparationError(
+            "手機產生的說話畫面轉換逾時，請重新選擇場景後再試。"
+        ) from error
+
+    if (
+        result.returncode != 0
+        or not output_path.exists()
+        or output_path.stat().st_size == 0
+    ):
+        raise BuiltinMaterialPreparationError(
+            "手機產生的說話畫面格式無法讀取，請重新選擇場景後再試。"
+        )
+
+    return output_path
 
 
 class NoteListCreate(generics.ListCreateAPIView):
@@ -669,15 +751,26 @@ def compose_video(request):
             try:
                 for index, segment in enumerate(segments, start=1):
                     text = segment.get("text", "").strip()
+                    material_type = segment.get("materialType", "external")
                     audio_path = temp_path / f"audio_{index}.mp3"
 
                     audio_path.write_bytes(asyncio.run(synthesize_tts_audio(text, voice)))
                     audio_clip = AudioFileClip(str(audio_path))
                     target_size = video_settings["size"]
-                    material_type = segment.get("materialType", "external")
                     video_path = temp_path / f"video_{index}.webm"
                     download_file(segment["videoUrl"], video_path, request=request)
-                    video_clip = VideoFileClip(str(video_path))
+
+                    if material_type == "builtin":
+                        normalized_video_path = temp_path / f"video_{index}_normalized.mp4"
+                        normalize_builtin_material_video(
+                            video_path,
+                            normalized_video_path,
+                        )
+                        moviepy_video_path = normalized_video_path
+                    else:
+                        moviepy_video_path = video_path
+
+                    video_clip = VideoFileClip(str(moviepy_video_path))
                     fitted_video_clip, fitted_resources = fit_video_clip_to_canvas(video_clip, target_size)
 
                     if material_type == "builtin" and segment.get("loopMaterial"):
@@ -767,8 +860,23 @@ def compose_video(request):
                     close = getattr(resource, "close", None)
                     if close:
                         close()
+    except BuiltinMaterialPreparationError as error:
+        return Response(
+            {"detail": f"影片合成失敗：{error}"},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
     except Exception as error:
-        return Response({"detail": f"影片合成失敗：{error}"}, status=status.HTTP_502_BAD_GATEWAY)
+        error_text = str(error)
+
+        if "Duration: N/A" in error_text or "Error passing `ffmpeg -i`" in error_text:
+            detail = "手機產生的素材缺少影片時長，請重新選擇場景後再試。"
+        else:
+            detail = error_text
+
+        return Response(
+            {"detail": f"影片合成失敗：{detail}"},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
 
     response = HttpResponse(output_bytes, content_type="video/mp4")
     response["Content-Disposition"] = 'inline; filename="composed-video.mp4"'
