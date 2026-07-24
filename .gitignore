@@ -1,6 +1,9 @@
 .venv/
 .runtime/
+.railway/
 __pycache__/
 *.py[cod]
 backend/media/
+backend/frontend_dist/
+backend/staticfiles/
 get-pip.py
